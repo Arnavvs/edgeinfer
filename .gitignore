@@ -1,0 +1,12 @@
+build/
+build-*/
+.venv/
+__pycache__/
+*.eim
+*.gguf
+*.npz
+*.npy
+*.faiss
+*.db
+*.part
+*.building

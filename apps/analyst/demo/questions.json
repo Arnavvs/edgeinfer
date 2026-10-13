@@ -1,0 +1,8 @@
+[
+  {"q": "How many books are in the catalogue?", "sql": "SELECT COUNT(*) FROM books"},
+  {"q": "Which city has the most customers?", "sql": "SELECT city FROM customers GROUP BY city ORDER BY COUNT(*) DESC LIMIT 1"},
+  {"q": "Which genre sold the most copies?", "sql": "SELECT b.genre FROM orders o JOIN books b ON b.id = o.book_id GROUP BY b.genre ORDER BY SUM(o.qty) DESC LIMIT 1"},
+  {"q": "What is the average star rating across all reviews?", "sql": "SELECT ROUND(AVG(stars), 2) FROM reviews"},
+  {"q": "How many orders were placed in March 2026?", "sql": "SELECT COUNT(*) FROM orders WHERE day LIKE '2026-03-%'"},
+  {"q": "What is the most expensive book and its price?", "sql": "SELECT title, price_inr FROM books ORDER BY price_inr DESC LIMIT 1", "match": "all"}
+]

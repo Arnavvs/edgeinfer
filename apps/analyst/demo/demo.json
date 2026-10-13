@@ -1,0 +1,28 @@
+{
+  "name": "the demo bookshop",
+  "analytics_db": "~/edgeinfer-data/demo/analyst.db",
+  "vectors": "~/edgeinfer-data/demo/vectors.faiss",
+  "embedder": "~/edgeinfer-data/hf/multilingual-e5-small/onnx",
+  "attach": {"src": "~/edgeinfer-data/demo/shop.db"},
+  "build_sql": "build.sql",
+  "default_model": "qwen3.5-2b",
+  "tables": {
+    "books": "Catalogue: title, genre, list price in INR, pages, publication year",
+    "customers": "Customers and their city",
+    "orders": "One row per order line (day as YYYY-MM-DD)",
+    "reviews": "Star ratings (1-5) with a short text"
+  },
+  "columns": {"orders.qty": "copies in the order line"},
+  "documents": [
+    {"source": "review", "sql": "SELECT r.id, b.title, r.text FROM reviews r JOIN books b ON b.id = r.book_id"},
+    {"source": "book", "sql": "SELECT id, title, title || ' (' || genre || ', ' || year || ')' FROM books"}
+  ],
+  "examples": [
+    {"question": "Best-selling genre by copies", "sql": "SELECT b.genre, SUM(o.qty) AS copies FROM orders o JOIN books b ON b.id = o.book_id GROUP BY b.genre ORDER BY copies DESC LIMIT 5"}
+  ],
+  "starter_questions": [
+    "Which city buys the most books?",
+    "What do unhappy reviewers complain about?",
+    "Monthly revenue in 2026, as a table"
+  ]
+}

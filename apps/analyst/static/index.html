@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Data Desk</title>
+<style>
+:root{--bg:#f4f4f1;--panel:#fbfbf9;--card:#fff;--line:#e2e1dc;--tx:#141413;--tx2:#45443f;--mut:#76756d;
+ --acc:#2a6fd6;--acc2:#e8f0fc;--ok:#1a8a5f;--err:#c43c3b;--code:#f0efea}
+@media(prefers-color-scheme:dark){:root{--bg:#171716;--panel:#1c1c1b;--card:#232321;--line:#363633;--tx:#f2f1ec;
+ --tx2:#cfcec6;--mut:#9b9a92;--acc:#5b95ec;--acc2:#1f2b3d;--ok:#3cc28d;--err:#f0706e;--code:#2b2b29}}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--tx);font:14.5px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+ display:grid;grid-template-columns:260px 1fr;overflow:hidden}
+aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+aside header{padding:14px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--line)}
+aside h1{font-size:16px;margin:0;flex:1}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--tx);border-radius:8px;padding:6px 10px}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+#convs{overflow:auto;flex:1;padding:6px}
+.conv{padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conv:hover{background:var(--card)}.conv.on{background:var(--acc2);color:var(--tx)}
+aside footer{padding:10px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--mut);display:flex;justify-content:space-between;align-items:center}
+main{display:flex;flex-direction:column;min-width:0;height:100vh}
+.top{display:flex;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+.top .title{font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+select{font:inherit;padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--tx)}
+#menu{display:none}
+#log{flex:1;overflow:auto;padding:18px 16px 8px}
+.wrap{max-width:860px;margin:0 auto}
+.msg{margin:0 0 18px}.msg.user .bubble{background:var(--acc2);border-radius:12px;padding:10px 14px;display:inline-block;max-width:100%}
+.msg.user{text-align:right}.msg.user .bubble{text-align:left}
+.bubble{overflow-wrap:anywhere}
+.bubble p{margin:.4em 0}.bubble table{border-collapse:collapse;margin:.5em 0;font-size:13px;display:block;overflow:auto;max-width:100%}
+.bubble th,.bubble td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
+.bubble th{background:var(--panel)}
+.bubble code{background:var(--code);padding:1px 5px;border-radius:4px;font:12.5px ui-monospace,Menlo,Consolas,monospace}
+.bubble pre{background:var(--code);padding:10px;border-radius:8px;overflow:auto}.bubble pre code{padding:0;background:none}
+.step{border:1px solid var(--line);background:var(--card);border-radius:10px;margin:6px 0;font-size:13px}
+.step summary{padding:6px 10px;cursor:pointer;color:var(--tx2);list-style:none;display:flex;gap:8px;align-items:center}
+.step summary::-webkit-details-marker{display:none}
+.step .tag{font:600 11px ui-monospace,Menlo,monospace;padding:1px 6px;border-radius:6px;background:var(--acc2);color:var(--acc)}
+.step .body{padding:6px 10px 10px;border-top:1px solid var(--line)}
+.step pre{margin:0 0 6px;white-space:pre-wrap;font:12px ui-monospace,Menlo,Consolas,monospace;background:var(--code);padding:6px 8px;border-radius:6px}
+.step table{border-collapse:collapse;font-size:12px;display:block;overflow:auto}
+.step td,.step th{border:1px solid var(--line);padding:2px 6px;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.err{color:var(--err)}.mut{color:var(--mut)}
+.perf{font-size:12px;color:var(--mut);margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.perf b{color:var(--tx2);font-weight:600}
+.cursor::after{content:"▍";animation:b 1s steps(1) infinite;color:var(--acc)}@keyframes b{50%{opacity:0}}
+.starters{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin:12px 0}
+.starters button{text-align:left;padding:10px 12px;border-radius:10px;color:var(--tx2)}
+.hero{margin:6vh 0 16px}.hero h2{margin:0 0 4px;font-size:22px}
+form#ask{border-top:1px solid var(--line);background:var(--panel);padding:10px 16px 14px}
+form#ask .wrap{display:flex;gap:8px;align-items:flex-end}
+textarea{flex:1;resize:none;max-height:180px;min-height:44px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
+ background:var(--card);color:var(--tx);font:inherit}
+textarea:focus{outline:2px solid var(--acc);outline-offset:-1px}
+@media(max-width:760px){body{grid-template-columns:1fr}aside{position:fixed;inset:0 25% 0 0;z-index:5;transform:translateX(-105%);transition:transform .2s}
+ aside.open{transform:none}#menu{display:inline-block}}
+</style></head><body>
+<aside id="side">
+  <header><h1>Data Desk</h1><button class="primary" id="new">New</button></header>
+  <div id="convs"></div>
+  <footer><span id="who"></span><form method="post" action="/logout"><button type="submit">Sign out</button></form></footer>
+</aside>
+<main>
+  <div class="top">
+    <button id="menu" aria-label="conversations">☰</button>
+    <div class="title" id="title">New conversation</div>
+    <label class="mut" for="model">model</label><select id="model"></select>
+  </div>
+  <div id="log"><div class="wrap" id="msgs"></div></div>
+  <form id="ask"><div class="wrap">
+    <textarea id="q" rows="1" placeholder="Ask about your data…  (Enter to send, Shift+Enter for a new line)"></textarea>
+    <button class="primary" id="send">Send</button></div></form>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>(s??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let conv=null, busy=false, ME=null;
+const H={'X-Requested-With':'datadesk','Content-Type':'application/json'};
+
+// small, safe markdown: input is escaped first, then a few constructs are re-enabled
+function md(src){
+  const blocks=[];src=src.replace(/```(\w*)\n([\s\S]*?)```/g,(_,l,c)=>{blocks.push(c);return `\u0000${blocks.length-1}\u0000`});
+  let h=esc(src);
+  const lines=h.split('\n'),out=[];let i=0;
+  while(i<lines.length){
+    const l=lines[i];
+    if(/^\s*\|.*\|\s*$/.test(l)&&i+1<lines.length&&/^\s*\|[\s:|-]+\|\s*$/.test(lines[i+1])){
+      const row=r=>r.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      let t='<table><thead><tr>'+row(l).map(c=>`<th>${c}</th>`).join('')+'</tr></thead><tbody>';i+=2;
+      while(i<lines.length&&/^\s*\|.*\|\s*$/.test(lines[i])){t+='<tr>'+row(lines[i]).map(c=>`<td>${c}</td>`).join('')+'</tr>';i++}
+      out.push(t+'</tbody></table>');continue}
+    if(/^\s*[-*] /.test(l)){let t='<ul>';while(i<lines.length&&/^\s*[-*] /.test(lines[i])){t+='<li>'+lines[i].replace(/^\s*[-*] /,'')+'</li>';i++}out.push(t+'</ul>');continue}
+    if(/^\s*\d+\. /.test(l)){let t='<ol>';while(i<lines.length&&/^\s*\d+\. /.test(lines[i])){t+='<li>'+lines[i].replace(/^\s*\d+\. /,'')+'</li>';i++}out.push(t+'</ol>');continue}
+    if(/^#{1,4} /.test(l)){out.push('<p><b>'+l.replace(/^#+ /,'')+'</b></p>');i++;continue}
+    out.push(l.trim()?'<p>'+l+'</p>':'');i++}
+  h=out.join('');
+  h=h.replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g,'$1<i>$2</i>')
+     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return h.replace(/\u0000(\d+)\u0000/g,(_,n)=>`<pre><code>${esc(blocks[+n])}</code></pre>`);
+}
+function scroll(){const l=$('#log');l.scrollTop=l.scrollHeight}
+function el(html){const d=document.createElement('div');d.innerHTML=html;return d.firstElementChild}
+
+function toolCard(e){
+  const a=e.args||{},m=e.meta||{};
+  let head=e.name==='sql'?esc((a.query||'').slice(0,90)):esc(a.query||'');
+  let body='';
+  if(e.name==='sql'){
+    body+=`<pre>${esc(a.query||'')}</pre>`;
+    if(m.error){body+='<div class="err">query failed</div>'}
+    else if(m.columns){body+=`<div class="mut">${m.rows}${m.truncated?'+':''} rows · ${m.ms} ms</div><table><tr>${m.columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr>${(m.preview||[]).map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>`}
+  }else{
+    body+=`<div class="mut">${(m.hits||[]).length} matches · ${m.ms} ms${a.source?` · source ${esc(a.source)}`:''}</div>`;
+    body+=(m.hits||[]).map(h=>`<p><span class="tag">${esc(h.source)}</span> <b>${esc(h.title||h.ref)}</b> — ${esc(h.text)}</p>`).join('');
+  }
+  return `<details class="step"><summary><span class="tag">${esc(e.name)}</span><span>${head}</span></summary><div class="body">${body}</div></details>`;
+}
+function perfLine(t,model,steps){
+  const f=(x,d=1)=>x==null?'–':(+x).toFixed(d);
+  const last=steps[steps.length-1]||{};
+  const cached=t.prompt_tokens?Math.round(100*t.cached_tokens/t.prompt_tokens):0;
+  return `<div class="perf"><span><b>${esc(model)}</b></span><span>first token <b>${f(t.ttft_s,2)} s</b></span>
+   <span>decode <b>${f(last.gen_tok_s)}</b> tok/s</span><span>${t.steps} model call${t.steps>1?'s':''}</span>
+   <span>prompt ${t.prompt_tokens} tok, <b>${cached}%</b> from cache</span><span>tools ${f(t.tool_s,2)} s</span><span>total ${f(t.total_s)} s</span></div>`;
+}
+
+function renderStored(msgs){
+  const box=$('#msgs');box.innerHTML='';
+  let cur=null;
+  for(const m of msgs){
+    if(m.role==='user'){box.append(el(`<div class="msg user"><div class="bubble">${esc(m.content)}</div></div>`));cur=null;continue}
+    if(!cur){cur=el('<div class="msg"><div class="steps"></div><div class="bubble"></div></div>');box.append(cur)}
+    if(m.role==='assistant'&&m.tool_calls){for(const c of m.tool_calls){let a={};try{a=JSON.parse(c.function.arguments)}catch(e){}
+      cur.querySelector('.steps').append(el(toolCard({name:c.function.name,args:a,meta:{}})))}}
+    else if(m.role==='assistant'){cur.querySelector('.bubble').innerHTML=md(m.content||'')}
+  }
+  scroll();
+}
+function hero(){
+  const s=(ME.starters||[]).map(q=>`<button type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('');
+  $('#msgs').innerHTML=`<div class="hero"><h2>Ask about ${esc(ME.dataset)}</h2><div class="mut">Answers come from a local model that queries your data with SQL and search; every step is shown.</div></div><div class="starters">${s}</div>`;
+  document.querySelectorAll('.starters button').forEach(b=>b.onclick=()=>{$('#q').value=b.dataset.q;send()});
+}
+async function loadConvs(){
+  const r=await fetch('/api/conversations');if(r.status===401){location='/login';return}
+  const cs=await r.json();
+  $('#convs').innerHTML=cs.map(c=>`<div class="conv${c.id===conv?' on':''}" data-id="${c.id}" title="${esc(c.title)}">${esc(c.title)}</div>`).join('')||'<div class="mut" style="padding:8px">No conversations yet</div>';
+  document.querySelectorAll('.conv').forEach(d=>d.onclick=()=>openConv(d.dataset.id));
+}
+async function openConv(id){
+  if(busy)return;conv=id;const r=await fetch('/api/conversations/'+id);const c=await r.json();
+  $('#title').textContent=c.title;renderStored(c.messages);loadConvs();$('#side').classList.remove('open');
+}
+async function send(ev){
+  ev&&ev.preventDefault();const q=$('#q').value.trim();if(!q||busy)return;
+  busy=true;$('#send').disabled=true;$('#q').value='';
+  if(!conv)$('#msgs').innerHTML='';
+  $('#msgs').append(el(`<div class="msg user"><div class="bubble">${esc(q)}</div></div>`));
+  const box=el('<div class="msg"><div class="steps"></div><div class="bubble cursor"></div><div class="foot"></div></div>');
+  $('#msgs').append(box);scroll();
+  let text='',steps=[];
+  const r=await fetch('/api/chat',{method:'POST',headers:H,body:JSON.stringify({message:q,conversation:conv,model:$('#model').value})});
+  if(!r.ok){box.querySelector('.bubble').innerHTML=`<span class="err">${esc(await r.text())}</span>`;busy=false;$('#send').disabled=false;return}
+  const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+  while(true){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});
+    let i;while((i=buf.indexOf('\n\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+2);if(!line.startsWith('data: '))continue;
+      const e=JSON.parse(line.slice(6));
+      if(e.type==='conversation'){if(!conv){conv=e.id;$('#title').textContent=q.slice(0,80)}}
+      else if(e.type==='token'){text+=e.text;box.querySelector('.bubble').innerHTML=md(text)}
+      else if(e.type==='tool_intent'){if(e.text.trim())box.querySelector('.steps').append(el(`<div class="mut" style="font-size:13px">${esc(e.text)}</div>`));text='';box.querySelector('.bubble').innerHTML=''}
+      else if(e.type==='tool'){box.querySelector('.steps').append(el(toolCard(e)))}
+      else if(e.type==='step'){steps.push(e.timing||{})}
+      else if(e.type==='error'){box.querySelector('.bubble').innerHTML+=`<p class="err">${esc(e.message)}</p>`}
+      else if(e.type==='done'){box.querySelector('.foot').innerHTML=perfLine(e.totals,e.model,steps)}
+      scroll()}}
+  box.querySelector('.bubble').classList.remove('cursor');
+  busy=false;$('#send').disabled=false;loadConvs();$('#q').focus();
+}
+$('#ask').onsubmit=send;
+$('#q').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+$('#q').addEventListener('input',e=>{e.target.style.height='auto';e.target.style.height=Math.min(180,e.target.scrollHeight)+'px'});
+$('#new').onclick=()=>{if(busy)return;conv=null;$('#title').textContent='New conversation';hero();loadConvs();$('#side').classList.remove('open')};
+$('#menu').onclick=()=>$('#side').classList.toggle('open');
+(async()=>{
+  const r=await fetch('/api/me');if(r.status===401){location='/login';return}ME=await r.json();
+  $('#who').textContent=ME.user;
+  const m=await (await fetch('/api/models')).json();
+  $('#model').innerHTML=(m.data||[]).map(x=>`<option value="${esc(x.id)}"${x.id===ME.default_model?' selected':''}>${esc(x.id)}${x.loaded?' ●':''}</option>`).join('');
+  hero();loadConvs();
+})();
+</script></body></html>
