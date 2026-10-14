@@ -116,6 +116,8 @@ def main():
     s.add_argument("--random", action="store_true", help="generate a password and write it next to users.json")
     a = ap.parse_args()
     users = Users(Path(a.users))
+    Path(a.users).parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(Path(a.users).parent, 0o700)
     if a.random:
         pw = secrets.token_urlsafe(12)
         out = Path(a.users).with_name(f"initial-password-{a.user}.txt")

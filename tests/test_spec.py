@@ -95,6 +95,25 @@ def main():
     print(f"cache : follow-up encoded {wt['prompt_tokens_encoded']} of "
           f"{warm['info']['usage']['prompt_tokens']} prompt tokens (cold: {ct['prompt_tokens_encoded']}), "
           f"TTFT {wt['ttft_s']} s vs cold {ct['ttft_s']} s, output matches cold run for {m2}/{len(cold['tokens'])} tokens")
+    # persistent prompt cache: a long system prompt survives a restart
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        long_sys = [{"role": "system", "content": "You are a data analyst. " + " ".join(
+            f"Table t{i} has columns a{i}, b{i}, c{i} and stores record set {i}." for i in range(40))},
+            {"role": "user", "content": "Name one table."}]
+        s1 = Scheduler(m, tok, n_slots=1, n_ctx=4096, n_draft=a.draft, cache_dir=td)
+        first = generate(s1, tok, long_sys, 16, spec=True)
+        s1.shutdown()
+        s2 = Scheduler(m, tok, n_slots=1, n_ctx=4096, n_draft=a.draft, cache_dir=td)
+        second = generate(s2, tok, long_sys, 16, spec=True)
+        restored = s2.metrics["disk_restores"]
+        s2.shutdown()
+    f1, f2 = first["info"]["timing"], second["info"]["timing"]
+    m3 = prefix_match(first["tokens"], second["tokens"])
+    ok &= restored == 1 and f2["prompt_tokens_encoded"] < f1["prompt_tokens_encoded"] and m3 >= 8
+    print(f"disk  : after restart encoded {f2['prompt_tokens_encoded']} of {second['info']['usage']['prompt_tokens']} "
+          f"prompt tokens (first run {f1['prompt_tokens_encoded']}), TTFT {f2['ttft_s']} s vs {f1['ttft_s']} s, "
+          f"restores {restored}, output matches for {m3}/{len(first['tokens'])} tokens")
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 

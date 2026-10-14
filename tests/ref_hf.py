@@ -18,7 +18,7 @@ PROMPTS = [
     "<|im_start|>assistant\n<think>\n\n</think>\n\n",
     "The capital of France is Paris. The capital of Germany is",
     "def fibonacci(n):\n    \"\"\"Return the n-th Fibonacci number.\"\"\"\n",
-    "Faridabad mein sabse acchi property kahan milegi? Sector 21 ya Greater Faridabad?",
+    "Delhi mein sabse acchi chai kahan milti hai? Chandni Chowk ya Connaught Place?",
 ]
 
 

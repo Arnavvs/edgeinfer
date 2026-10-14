@@ -25,8 +25,8 @@ TRAIN = Path.home() / "edgeinfer-data" / "eval" / "wikitext2-train.parquet"
 
 CHAT = [
     ("Summarise the main idea of this paragraph in one line.", "The paragraph argues that small models can run well on old laptops."),
-    ("Which sector in Faridabad has the most property dealers?", "Based on the listings, Sector 21 has the most dealers, followed by Greater Faridabad."),
-    ("Write a SQL query that counts creators by city.", "SELECT city, COUNT(*) AS n FROM creators GROUP BY city ORDER BY n DESC;"),
+    ("Which city has the most bookshops?", "Based on the listings, Pune has the most bookshops, followed by Kolkata."),
+    ("Write a SQL query that counts customers by city.", "SELECT city, COUNT(*) AS n FROM customers GROUP BY city ORDER BY n DESC;"),
     ("kya aap mujhe Hindi mein jawab de sakte ho?", "Haan bilkul, main Hindi aur Hinglish dono mein jawab de sakta hoon."),
 ]
 

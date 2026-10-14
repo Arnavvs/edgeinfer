@@ -33,7 +33,7 @@ def unpack(dt, buf, rows, cols):
 def main():
     rng = np.random.default_rng(0)
     ok = True
-    for name in ["q8", "q4", "q4k", "bf16", "f32"]:
+    for name in ["q8", "q6", "q4", "q4k", "bf16", "f32"]:
         dt = DTYPES[name]
         for rows, cols, m in [(64, 1024, 1), (70, 512, 3), (256, 2560, 8)]:
             w = (rng.standard_normal((rows, cols)) * 0.02).astype(np.float32)
@@ -46,8 +46,8 @@ def main():
             assert lib.ei_matmul(dt, buf.ctypes.data, rows, cols, x.ctypes.data, m, y.ctypes.data, 4) == 0
             ref = x.astype(np.float64) @ wd.astype(np.float64).T
             rel_y = np.linalg.norm(y - ref) / np.linalg.norm(ref)
-            lim_w = {"q8": 0.01, "q4": 0.13, "q4k": 0.11, "bf16": 0.005, "f32": 1e-7}[name]
-            lim_y = {"q8": 0.01, "q4": 0.01, "q4k": 0.01, "bf16": 1e-5, "f32": 1e-5}[name]  # vs dequantized weights
+            lim_w = {"q8": 0.01, "q6": 0.04, "q4": 0.13, "q4k": 0.11, "bf16": 0.005, "f32": 1e-7}[name]
+            lim_y = {"q8": 0.01, "q6": 0.01, "q4": 0.01, "q4k": 0.01, "bf16": 1e-5, "f32": 1e-5}[name]  # vs dequantized weights
             good = rel_w < lim_w and rel_y < lim_y
             ok &= good
             print(f"{name:4s} {rows:4d}x{cols:<5d} m={m}  weight rel err {rel_w:.4f}  matmul rel err {rel_y:.2e}"

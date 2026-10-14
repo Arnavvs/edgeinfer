@@ -7,8 +7,8 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 
-F32, F16, BF16, Q8, Q4, Q4K = 0, 1, 2, 3, 4, 5
-DTYPES = {"f32": F32, "f16": F16, "bf16": BF16, "q8": Q8, "q4": Q4, "q4k": Q4K}
+F32, F16, BF16, Q8, Q4, Q4K, Q6 = 0, 1, 2, 3, 4, 5, 6
+DTYPES = {"f32": F32, "f16": F16, "bf16": BF16, "q8": Q8, "q4": Q4, "q4k": Q4K, "q6": Q6}
 SEG_VERIFY, SEG_HIDDEN = 1, 2
 
 

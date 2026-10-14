@@ -69,9 +69,11 @@ class SqlTool:
         self.path = str(Path(db_path).expanduser())
         self.timeout = timeout_s
 
-    def _con(self) -> sqlite3.Connection:
+    def _con(self, restricted: bool = True) -> sqlite3.Connection:
         c = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, check_same_thread=False)
         c.execute("PRAGMA query_only = 1")
+        if not restricted:  # the app's own schema introspection; model SQL never runs here
+            return c
         allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
                    getattr(sqlite3, "SQLITE_RECURSIVE", 33)}
 
@@ -107,7 +109,7 @@ class SqlTool:
                       "ms": round((time.time() - t0) * 1000), "truncated": more}
 
     def schema(self, notes: dict, colnotes: dict) -> str:
-        c = self._con()
+        c = self._con(restricted=False)
         out = []
         try:
             for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'docs%' "
@@ -134,14 +136,19 @@ class Agent:
         self.refresh()
 
     def refresh(self) -> None:
+        self.db_mtime = Path(self.sql.path).stat().st_mtime
         schema = self.sql.schema(self.cfg.get("tables", {}), self.cfg.get("columns", {}))
         sources = ", ".join(s for s, _ in self.ret.sources()) or "none"
         ex = "\n".join(f"Q: {e['question']}\nsql: {e['sql']}" for e in self.cfg.get("examples", []))
         self.system = SYSTEM.format(schema="Tables (SQLite):\n" + schema, sources=sources, examples=ex or "(none)")
 
     async def _complete(self, client: httpx.AsyncClient, messages, model, tools, emit, step) -> dict:
-        body = {"model": model, "messages": messages, "stream": True, "temperature": 0.2, "top_p": 0.9,
-                "top_k": 20, "max_tokens": 900, "stream_options": {"include_usage": True}}
+        # small models loop on repetitive SQL at low temperature; a mild repetition
+        # penalty fixes it (presence penalty would also punish markdown table pipes)
+        sampling = {"temperature": 0.3, "top_p": 0.9, "top_k": 20, "repetition_penalty": 1.08,
+                    **self.cfg.get("sampling", {})}
+        body = {"model": model, "messages": messages, "stream": True, "max_tokens": 900,
+                "stream_options": {"include_usage": True}, **sampling}
         if tools:
             body["tools"] = tools
         content, calls, timing, usage, finish = "", [], {}, {}, None
@@ -170,6 +177,8 @@ class Agent:
 
     async def run(self, history: list[dict], question: str, model: str,
                   emit: Callable[[dict], Awaitable[None]], max_steps: int = 4) -> list[dict]:
+        if Path(self.sql.path).stat().st_mtime != self.db_mtime:  # nightly rebuild: new row counts
+            self.refresh()
         msgs = [{"role": "system", "content": self.system}] + history + [{"role": "user", "content": question}]
         new: list[dict] = []
         totals = {"steps": 0, "prompt_tokens": 0, "cached_tokens": 0, "completion_tokens": 0, "llm_s": 0.0,

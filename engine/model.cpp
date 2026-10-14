@@ -207,6 +207,8 @@ void qact(ei_ctx* c, const float* x, int ld, int m, int k) {
     c->qa.m = m;
     c->qa.k = k;
     c->qa.nb = k / QK;
+    c->qa.ns = k / QKK;
+    c->qa.has256 = k % QKK == 0;
     if (m * k < 32768) { quantize_act_rows(x, ld, k, c->qa, 0, m); return; }
     parallel_for(*c->m->pool, m, std::max(1, 8192 / k), [&](int a, int b, int) { quantize_act_rows(x, ld, k, c->qa, a, b); });
 }
@@ -713,6 +715,8 @@ extern "C" int ei_matmul(int dtype, const void* w, int64_t rows, int64_t cols, c
     qa.m = m;
     qa.k = int(cols);
     qa.nb = int(cols / QK);
+    qa.ns = int(cols / QKK);
+    qa.has256 = cols % QKK == 0;
     if (dtype_is_tiled(dtype)) quantize_act_rows(x, int(cols), int(cols), qa, 0, m);
     matmul(pool, t, &qa, x, int(cols), m, y, int(rows));
     return 0;
@@ -761,6 +765,9 @@ extern "C" ei_model* ei_model_load(const char* path, int n_threads, char* err, i
         c.rope_theta = float(ld.cfg.at("rope_theta"));
         c.eps = float(ld.cfg.at("rms_norm_eps"));
         for (double v : ld.arr.at("layer_types")) c.layer_types.push_back(int(v));
+        for (auto& kv : ld.t)
+            if (kv.second.dtype == Q4K && ld.ci("q4k_layout", 1) < 2)
+                throw std::runtime_error("q4k tensors use an old layout; re-convert the model");
         if (int(c.layer_types.size()) != c.L) throw std::runtime_error("layer_types length");
         if (c.dk > 256 || c.dv % 32 || c.convk != 4 || c.Dh % 8 || c.Hq / std::max(1, c.Hkv) > 16)
             throw std::runtime_error("unsupported dimensions");
@@ -801,7 +808,7 @@ extern "C" ei_model* ei_model_load(const char* path, int n_threads, char* err, i
         });
 
         std::ostringstream js;
-        int64_t bytes[8] = {};
+        int64_t bytes[16] = {};
         for (auto& kv : ld.t) bytes[kv.second.dtype] += kv.second.nbytes;
         js << "{\"arch\":\"" << c.arch << "\",\"hidden_size\":" << c.D << ",\"layers\":" << c.L
            << ",\"linear_layers\":" << m->n_lin << ",\"attention_layers\":" << m->n_att
@@ -810,7 +817,7 @@ extern "C" ei_model* ei_model_load(const char* path, int n_threads, char* err, i
            << ",\"lm_head_dtype\":\"" << dtype_name(m->lm_head.dtype) << "\""
            << ",\"bytes_by_dtype\":{";
         bool first = true;
-        for (int d = 0; d <= Q4K; ++d)
+        for (int d = 0; d <= Q6; ++d)
             if (bytes[d]) { js << (first ? "" : ",") << "\"" << dtype_name(d) << "\":" << bytes[d]; first = false; }
         js << "}}";
         m->info = js.str();

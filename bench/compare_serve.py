@@ -101,7 +101,9 @@ def start(server, a):
         time.sleep(3)
         mf = home / f"{tag}.Modelfile"
         mf.write_text(f"FROM {a.gguf}\nPARAMETER num_thread {a.threads}\n")
-        subprocess.run([OLLAMA, "create", tag, "-f", str(mf)], env=env, capture_output=True)
+        if subprocess.run([OLLAMA, "create", tag, "-f", str(mf)], env=env, capture_output=True).returncode != 0:
+            tag = "qwen3.5:" + a.name.split("-")[-1].lower()  # Ollama's own library build
+            subprocess.run([OLLAMA, "pull", tag], env=env, capture_output=True)
         return proc, "http://127.0.0.1:11435", "/api/version", tag
     raise ValueError(server)
 

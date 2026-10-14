@@ -192,7 +192,12 @@ def bench_ollama(a):
         tag = f"bench-{a.name}"
         mf = home / f"{tag}.Modelfile"
         mf.write_text(f"FROM {a.gguf}\n")
-        run([OLLAMA, "create", tag, "-f", str(mf)], env)
+        try:
+            run([OLLAMA, "create", tag, "-f", str(mf)], env)
+        except RuntimeError:
+            # Ollama could not import this GGUF: use its own library build of the model
+            tag = "qwen3.5:" + a.name.split("-")[-1].lower()
+            run([OLLAMA, "pull", tag], env, timeout=7200)
 
         def gen(prompt_tokens, n_predict, num_ctx=4800):
             body = {"model": tag, "prompt": " ".join(["hello"] * prompt_tokens), "raw": True, "stream": False,

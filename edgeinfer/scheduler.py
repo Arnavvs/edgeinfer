@@ -17,11 +17,14 @@ prefix and only encodes the rest.
 from __future__ import annotations
 
 import ctypes as C
+import hashlib
+import json
 import queue
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -71,6 +74,16 @@ class Snap:
 
 
 @dataclass
+class DiskSnap:
+    """A shared prefix (typically a system prompt) with its KV rows, persisted
+    to disk so a restart does not have to re-encode it."""
+    id: int
+    tokens: list[int]
+    last_hidden: np.ndarray | None
+    nbytes: int
+
+
+@dataclass
 class SlotState:
     tokens: list[int] = field(default_factory=list)
     last_hidden: np.ndarray | None = None
@@ -91,7 +104,8 @@ def lcp(a: list[int], b: list[int]) -> int:
 class Scheduler:
     def __init__(self, model: Model, tok: ChatTokenizer, *, n_slots: int = 2, n_ctx: int = 8192,
                  max_batch: int = 256, prefill_chunk: int = 256, n_draft: int = 2, spec: bool = True,
-                 snap_every: int = 1024, snap_budget_mb: int = 512, max_snaps_per_slot: int = 8):
+                 snap_every: int = 1024, snap_budget_mb: int = 512, max_snaps_per_slot: int = 8,
+                 cache_dir: str | None = None, disk_min_tokens: int = 256, max_disk_snaps: int = 4):
         self.model, self.tok = model, tok
         self.n_slots, self.n_ctx = n_slots, n_ctx
         self.max_batch, self.prefill_chunk = max_batch, prefill_chunk
@@ -100,6 +114,9 @@ class Scheduler:
         self.max_snaps = max_snaps_per_slot
         self.ctx = Context(model, n_slots=n_slots, n_ctx=n_ctx, max_batch=max_batch, max_draft=max(self.n_draft, 1))
         self.slots = [SlotState() for _ in range(n_slots)]
+        self.cache_dir = Path(cache_dir).expanduser() if cache_dir else None
+        self.disk_min, self.max_disk = disk_min_tokens, max_disk_snaps
+        self.disk: list[DiskSnap] = []
         self.waiting: queue.Queue[Request] = queue.Queue()
         self.active: list[Request] = []
         self.lock = threading.Lock()
@@ -109,8 +126,9 @@ class Scheduler:
         self.metrics = {
             "requests": 0, "prompt_tokens": 0, "cached_tokens": 0, "gen_tokens": 0,
             "drafted": 0, "accepted": 0, "forward_s": 0.0, "steps": 0, "snapshots": 0,
-            "ttft_s": [], "tpot_s": [], "prefill_tok_s": [],
+            "ttft_s": [], "tpot_s": [], "prefill_tok_s": [], "disk_restores": 0,
         }
+        self._load_disk()
         self.thread = threading.Thread(target=self._loop, name="edgeinfer-scheduler", daemon=True)
         self.thread.start()
 
@@ -180,7 +198,19 @@ class Scheduler:
                 best = (reuse, i, snap, -s.used)
         reuse, si, snap, _ = best
         s = self.slots[si]
-        if snap is not None:
+        for d in self.disk:  # a persisted shared prefix beats a shorter per-slot one
+            n = len(d.tokens)
+            if reuse < n <= len(P) - 1 and P[:n] == d.tokens:
+                self.ctx.snap_restore(si, d.id)
+                s.tokens, s.last_hidden, reuse, snap = list(d.tokens), d.last_hidden, n, None
+                self.metrics["disk_restores"] += 1
+                self._invalidate_snaps(si, 0)
+                break
+        else:
+            d = None
+        if d is not None:
+            pass
+        elif snap is not None:
             self.ctx.snap_restore(si, snap.id)
             snap.used = time.time()
             s.tokens = P[:reuse]
@@ -220,6 +250,42 @@ class Scheduler:
             sl_i, old = min(((i, sn) for i, sl in enumerate(self.slots) for sn in sl.snaps), key=lambda x: x[1].used)
             self._drop(sl_i, old)
             total -= old.nbytes
+
+    # ---------------------------------------------------------------- disk cache
+    def _key(self, tokens: list[int]) -> str:
+        return hashlib.sha1(np.asarray(tokens, dtype=np.int32).tobytes()).hexdigest()[:16]
+
+    def _load_disk(self) -> None:
+        if not self.cache_dir or not self.cache_dir.exists():
+            return
+        metas = sorted(self.cache_dir.glob("*.json"), key=lambda p: -p.stat().st_mtime)[: self.max_disk]
+        for meta in metas:
+            try:
+                info = json.loads(meta.read_text())
+                sid = self.ctx.snap_read(str(meta.with_suffix(".snap")))
+                lh = np.load(meta.with_suffix(".npy")) if meta.with_suffix(".npy").exists() else None
+                self.disk.append(DiskSnap(sid, info["tokens"], lh, self.ctx.snap_bytes(sid)))
+            except Exception:
+                continue  # stale or from another model build: ignore
+
+    def _persist(self, si: int) -> None:
+        if not self.cache_dir:
+            return
+        toks = list(self.slots[si].tokens)
+        if any(d.tokens == toks for d in self.disk):
+            return
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        key = self._key(toks)
+        sid = self.ctx.snap_save(si, True)
+        self.ctx.snap_write(sid, str(self.cache_dir / f"{key}.snap"))
+        lh = self.slots[si].last_hidden
+        if lh is not None:
+            np.save(self.cache_dir / f"{key}.npy", lh)
+        (self.cache_dir / f"{key}.json").write_text(json.dumps({"tokens": toks, "saved": time.time()}))
+        self.disk.append(DiskSnap(sid, toks, None if lh is None else lh.copy(), self.ctx.snap_bytes(sid)))
+        while len(self.disk) > self.max_disk:
+            old = self.disk.pop(0)
+            self.ctx.snap_free(old.id)
 
     def _drop(self, si: int, sn: Snap) -> None:
         self.ctx.snap_free(sn.id)
@@ -337,6 +403,8 @@ class Scheduler:
         r.pos = b
         if b in r.snap_at or b % self.snap_every == 0:
             self._snapshot(si)
+            if r.snap_at and b == r.snap_at[0] and b >= self.disk_min:
+                self._persist(si)
         if not last:
             return
         # first token

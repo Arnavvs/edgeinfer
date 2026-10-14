@@ -22,7 +22,7 @@ typedef struct ei_model ei_model;
 typedef struct ei_ctx ei_ctx;
 
 /* tensor storage types (also used by the converter) */
-enum { EI_F32 = 0, EI_F16 = 1, EI_BF16 = 2, EI_Q8 = 3, EI_Q4 = 4, EI_Q4K = 5 };
+enum { EI_F32 = 0, EI_F16 = 1, EI_BF16 = 2, EI_Q8 = 3, EI_Q4 = 4, EI_Q4K = 5, EI_Q6 = 6 };
 
 /* ---- quantization helpers for the converter --------------------------- */
 int64_t ei_tensor_bytes(int dtype, int64_t rows, int64_t cols);

@@ -86,7 +86,7 @@ A persistent pool with dynamic task grabbing (`fetch_add`), because the 4
 hyperthreads on 2 cores progress at different speeds. Workers spin with PAUSE
 for ~1 ms after a job, so the ~200 small parallel ops of a token cost about a
 microsecond each to dispatch, then sleep on a condition variable, so an idle
-server uses no CPU (the laptop also drives phones). A startup race (a late
+server uses no CPU (the laptop also runs other jobs). A startup race (a late
 worker missing the first job) was found with a native stack dump and fixed
 by handing each worker the generation counter from before it was started.
 

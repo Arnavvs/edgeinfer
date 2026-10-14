@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -93,37 +94,58 @@ def main():
     toks = load_tokens(a.hf, a.chunks * a.ctx)
     chunks = [toks[i * a.ctx:(i + 1) * a.ctx] for i in range(a.chunks)]
     first = a.ctx // 2
-    # all scorers stay loaded; each chunk is scored by every model and reduced
-    # immediately (full-vocab log-probs for a whole run would not fit in RAM)
-    scorers = [EiScorer(a.base, a.threads)] + [EiScorer(p, a.threads) for p in a.test] +               [GgufScorer(p, a.threads) for p in a.gguf]
-    names = [s.name for s in scorers]
-    names[1 + len(a.test):] = [n + " (llama.cpp)" for n in names[1 + len(a.test):]]
-    acc = {n: {"nll": [], "kl": [], "top1": [], "sec": 0.0} for n in names}
+    n_pos = a.ctx - 1 - first
+    # The base model's full-vocabulary log-probs go to a disk-backed memmap, then
+    # every test model is loaded alone and compared chunk by chunk: peak RAM is
+    # one model + one chunk, so a 4B model and its variants fit in 8 GB.
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix=".f32", dir=Path.home() / "edgeinfer-data", delete=False)
+    tmp.close()
     t0 = time.time()
+    base = EiScorer(a.base, a.threads)
+    V = base.m.n_vocab
+    blp_all = np.lib.format.open_memmap(tmp.name, mode="w+", dtype=np.float32, shape=(len(chunks), n_pos, V))
+    base_sec = 0.0
     for ci, ch in enumerate(chunks):
-        tg = ch[first + 1:]
-        idx = np.arange(len(tg))
-        blp = None
-        for n, sc in zip(names, scorers):
-            t1 = time.time()
-            lp = sc.logits(ch, first)
-            acc[n]["sec"] += time.time() - t1
-            if blp is None:
-                blp = lp
-                p = np.exp(blp.astype(np.float64))
-            acc[n]["nll"].append(-lp[idx, tg])
-            acc[n]["kl"].append((p * (blp - lp)).sum(-1))
-            acc[n]["top1"].append(lp.argmax(-1) == blp.argmax(-1))
-        print(f"chunk {ci + 1}/{len(chunks)} {time.time() - t0:.0f}s", flush=True)
-    for n in names:
-        nll, kl, top1 = (np.concatenate(acc[n][k]) for k in ("nll", "kl", "top1"))
-        row = {"model": n, "tokens": int(len(kl)), "ppl": round(float(np.exp(nll.mean())), 4),
+        t1 = time.time()
+        blp_all[ci] = base.logits(ch, first)
+        base_sec += time.time() - t1
+    blp_all.flush()
+    base_name = base.name
+    del base
+    print(f"base {base_name}: {len(chunks)} chunks in {time.time() - t0:.0f}s", flush=True)
+
+    specs = [(p, False) for p in [a.base] + a.test] + [(p, True) for p in a.gguf]
+    for path, is_gguf in specs:
+        sc = GgufScorer(path, a.threads) if is_gguf else EiScorer(path, a.threads)
+        name = sc.name + (" (llama.cpp)" if is_gguf else "")
+        nll, kls, top1, sec = [], [], [], 0.0
+        for ci, ch in enumerate(chunks):
+            tg = ch[first + 1:]
+            idx = np.arange(len(tg))
+            blp = np.asarray(blp_all[ci])
+            if path == a.base and not is_gguf:
+                lp = blp
+            else:
+                t1 = time.time()
+                lp = sc.logits(ch, first)
+                sec += time.time() - t1
+            p = np.exp(blp.astype(np.float64))
+            nll.append(-lp[idx, tg])
+            kls.append((p * (blp - lp)).sum(-1))
+            top1.append(lp.argmax(-1) == blp.argmax(-1))
+        del sc
+        nll, kl, top1 = map(np.concatenate, (nll, kls, top1))
+        row = {"model": name, "tokens": int(len(kl)), "ppl": round(float(np.exp(nll.mean())), 4),
                "kld_mean": round(float(kl.mean()), 5), "kld_p99": round(float(np.percentile(kl, 99)), 4),
-               "top1_agree": round(float(top1.mean()), 4), "score_s": round(acc[n]["sec"], 1)}
-        print(json.dumps(row))
+               "top1_agree": round(float(top1.mean()), 4),
+               "score_s": round(base_sec if path == a.base and not is_gguf else sec, 1)}
+        print(json.dumps(row), flush=True)
         if a.out:
             with open(a.out, "a") as f:
                 f.write(json.dumps(row) + "\n")
+    del blp_all
+    os.unlink(tmp.name)
 
 
 if __name__ == "__main__":

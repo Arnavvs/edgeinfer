@@ -60,13 +60,52 @@ def fts_query(q: str) -> str:
     return " OR ".join(f'"{w}"' for w in words[:24])
 
 
+class LazyEmbedder:
+    """Loads the ONNX model on first use and drops it after `idle_s` without
+    queries (~470 MB of RAM on a box that also runs other jobs)."""
+
+    def __init__(self, model_dir: str, threads: int = 2, idle_s: float = 900):
+        import threading
+        self.args, self.idle = (model_dir, threads), idle_s
+        self.emb: Embedder | None = None
+        self.last = 0.0
+        self.lock = threading.Lock()
+        threading.Thread(target=self._reaper, daemon=True).start()
+
+    def encode(self, texts, kind="passage", batch=32):
+        import time
+        with self.lock:
+            if self.emb is None:
+                self.emb = Embedder(*self.args)
+            self.last = time.time()
+            return self.emb.encode(texts, kind, batch)
+
+    def _reaper(self):
+        import gc
+        import time
+        while True:
+            time.sleep(60)
+            with self.lock:
+                if self.emb is not None and time.time() - self.last > self.idle:
+                    self.emb = None
+                    gc.collect()
+
+
 class Retriever:
-    def __init__(self, db_path: str, vec_path: str, embedder: Embedder | None):
+    def __init__(self, db_path: str, vec_path: str, embedder):
         import faiss
         self.db_path = str(Path(db_path).expanduser())
         self.emb = embedder
         vp = Path(vec_path).expanduser()
         self.index = faiss.read_index(str(vp)) if vp.exists() else None
+        self.vec_path, self.vec_mtime = vp, vp.stat().st_mtime if vp.exists() else 0
+
+    def maybe_reload(self) -> None:
+        """Pick up a nightly rebuild without restarting the app."""
+        import faiss
+        if self.vec_path.exists() and self.vec_path.stat().st_mtime != self.vec_mtime:
+            self.index = faiss.read_index(str(self.vec_path))
+            self.vec_mtime = self.vec_path.stat().st_mtime
 
     def _con(self) -> sqlite3.Connection:
         c = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, check_same_thread=False)
@@ -78,6 +117,7 @@ class Retriever:
             return [(r[0], r[1]) for r in c.execute("SELECT source, COUNT(*) FROM docs GROUP BY source ORDER BY 2 DESC")]
 
     def search(self, query: str, k: int = 8, source: str | None = None, pool: int = 60) -> list[dict]:
+        self.maybe_reload()
         ranks: dict[int, float] = {}
         with self._con() as c:
             fq = fts_query(query)

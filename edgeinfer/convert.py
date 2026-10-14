@@ -75,9 +75,9 @@ def main(argv=None) -> int:
     ap.add_argument("--mtp-qtype", default=None, choices=list(DTYPES), help="MTP head weights (default: --qtype)")
     ap.add_argument("--no-mtp", action="store_true")
     ap.add_argument("--imatrix", type=Path, help="npz of per-input-channel importance, keyed by output tensor name")
-    ap.add_argument("--profile", choices=["q4m", "q4s"],
+    ap.add_argument("--profile", choices=["q4m", "q4h", "q4s"],
                     help="q4m: q4k + Q8 for ffn_down in the sensitive layers (llama.cpp's use_more_bits rule), "
-                         "ssm_out and the LM head; q4s: the same with a q4k LM head (faster decode)")
+                         "ssm_out and the LM head; q4h: the same with a 6-bit LM head; q4s: with a q4k LM head")
     ap.add_argument("--override", action="append", default=[], metavar="GLOB=DTYPE",
                     help="per-tensor dtype, e.g. 'blk.*.ffn_down=q8' (repeatable, last match wins)")
     ap.add_argument("--threads", type=int, default=os.cpu_count() or 4)
@@ -87,7 +87,7 @@ def main(argv=None) -> int:
         n = n.get("text_config", n)["num_hidden_layers"]
         more = [i for i in range(n) if i < n // 8 or i >= 7 * n // 8 or (i - n // 8) % 3 == 2]
         a.qtype = "q4k"
-        a.head = "q8" if a.profile == "q4m" else "q4k"
+        a.head = {"q4m": "q8", "q4h": "q6", "q4s": "q4k"}[a.profile]
         a.override = [f"blk.{i}.ffn_down=q8" for i in more] + ["blk.*.ssm_out=q8"] + a.override
 
     cfg_all = json.loads((a.hf_dir / "config.json").read_text())
@@ -119,6 +119,7 @@ def main(argv=None) -> int:
         "rope_dim": int(head_dim * partial), "rms_norm_eps": cfg["rms_norm_eps"],
         "attn_output_gate": int(cfg.get("attn_output_gate", False)),
         "mtp_num_hidden_layers": mtp_layers,
+        "q4k_layout": 2,
     }
 
     # ---- plan: (name, dtype, rows, cols, producer) ----

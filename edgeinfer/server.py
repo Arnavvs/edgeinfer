@@ -79,7 +79,8 @@ class Manager:
         self.sched = Scheduler(self.model, self.tok, n_slots=s.get("slots", 2), n_ctx=s.get("ctx", 8192),
                                max_batch=s.get("max_batch", 256), prefill_chunk=s.get("prefill_chunk", 256),
                                n_draft=s.get("draft", 2), spec=s.get("speculative", True),
-                               snap_every=s.get("snap_every", 1024), snap_budget_mb=s.get("snap_budget_mb", 512))
+                               snap_every=s.get("snap_every", 1024), snap_budget_mb=s.get("snap_budget_mb", 512),
+                               cache_dir=str(Path(self.cfg.get("cache_dir", "~/.cache/edgeinfer")).expanduser() / name))
         self.name = name
         self.loaded_at = time.time()
         self.load_s = time.time() - t0
@@ -328,7 +329,8 @@ def stats_dict() -> dict:
             "cache_hit_rate": round(m["cached_tokens"] / m["prompt_tokens"], 4) if m["prompt_tokens"] else None,
             "generated_tokens": m["gen_tokens"], "steps": m["steps"], "forward_s": round(m["forward_s"], 2),
             "spec_acceptance": round(m["accepted"] / m["drafted"], 4) if m["drafted"] else None,
-            "spec_drafted": m["drafted"], "snapshots": m["snapshots"],
+            "spec_drafted": m["drafted"], "snapshots": m["snapshots"], "disk_restores": m["disk_restores"],
+            "disk_prefixes": [len(d.tokens) for d in s.disk],
             "ttft_p50_s": _pct(m["ttft_s"], 50), "ttft_p95_s": _pct(m["ttft_s"], 95),
             "tpot_p50_ms": _pct([x * 1000 for x in m["tpot_s"]], 50),
             "decode_tok_s_p50": round(1 / np.percentile(m["tpot_s"], 50), 2) if m["tpot_s"] else None,

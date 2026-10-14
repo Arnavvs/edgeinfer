@@ -22,9 +22,9 @@ CASES = [
       {"role": "user", "content": "c"}], None),
     ([{"role": "user", "content": "a"}, {"role": "assistant", "content": "<think>\nhmm\n</think>\n\nb"},
       {"role": "user", "content": "c"}], None),
-    ([{"role": "system", "content": "Use tools."}, {"role": "user", "content": "how many creators?"},
+    ([{"role": "system", "content": "Use tools."}, {"role": "user", "content": "how many customers?"},
       {"role": "assistant", "content": "", "tool_calls": [{"type": "function", "function": {
-          "name": "sql", "arguments": {"query": "SELECT COUNT(*) FROM creators"}}}]},
+          "name": "sql", "arguments": {"query": "SELECT COUNT(*) FROM customers"}}}]},
       {"role": "tool", "content": "[[117]]"}], TOOLS),
     ([{"role": "user", "content": "q"}, {"role": "assistant", "content": "Let me check.", "tool_calls": [
         {"type": "function", "function": {"name": "sql", "arguments": "{\"query\": \"SELECT 1\"}"}}]},
@@ -69,7 +69,7 @@ def main():
     ok &= bool(marks) and all(0 < m < len(prompt) for m in marks)
 
     content, calls = parse_tool_calls("I'll query.\n\n<tool_call>\n<function=sql>\n<parameter=query>\n"
-                                      "SELECT city, COUNT(*) FROM creators GROUP BY city\n</parameter>\n</function>\n</tool_call>")
+                                      "SELECT city, COUNT(*) FROM customers GROUP BY city\n</parameter>\n</function>\n</tool_call>")
     ok &= content == "I'll query." and calls and json.loads(calls[0]["function"]["arguments"])["query"].startswith("SELECT")
     print("tool-call parse", content, calls[0]["function"])
     print("PASS" if ok else "FAIL")

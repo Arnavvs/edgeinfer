@@ -23,7 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 
 from .agent import Agent
 from .auth import RateLimiter, Sessions, Users
-from .retrieval import Embedder, Retriever
+from .retrieval import LazyEmbedder, Retriever
 
 HERE = Path(__file__).resolve().parent
 COOKIE = "dd_session"
@@ -41,6 +41,8 @@ def db() -> sqlite3.Connection:
                                         created REAL, updated REAL);
         CREATE TABLE IF NOT EXISTS msg(conv TEXT, idx INTEGER, role TEXT, body TEXT, created REAL,
                                        PRIMARY KEY(conv, idx));
+        CREATE TABLE IF NOT EXISTS feedback(conv TEXT, question TEXT, answer TEXT, rating INTEGER, note TEXT,
+                                            model TEXT, user TEXT, created REAL);
     """)
     return c
 
@@ -225,6 +227,21 @@ async def chat(req: Request):
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
+@app.post("/api/feedback")
+async def feedback(req: Request):
+    """Thumbs up/down on an answer; rated answers seed the eval set (bench/analyst_eval.py)."""
+    u = require_user(req)
+    b = await req.json()
+    rating = 1 if b.get("rating", 0) > 0 else -1
+    with db() as c:
+        if not c.execute("SELECT 1 FROM conv WHERE id=? AND user=?", (b.get("conversation"), u)).fetchone():
+            raise HTTPException(404, "not found")
+        c.execute("INSERT INTO feedback VALUES (?,?,?,?,?,?,?,?)",
+                  (b.get("conversation"), str(b.get("question", ""))[:2000], str(b.get("answer", ""))[:8000], rating,
+                   str(b.get("note", ""))[:1000], b.get("model"), u, time.time()))
+    return {"ok": True}
+
+
 @app.get("/api/health")
 async def health():
     return {"ok": True}
@@ -253,8 +270,7 @@ def main():
              sessions=Sessions(state / "session.key"), limiter=RateLimiter(),
              llm_headers={"Authorization": f"Bearer {os.environ['EDGEINFER_API_KEY']}"}
              if os.environ.get("EDGEINFER_API_KEY") else {})
-    emb = Embedder(cfg["embedder"], threads=2)
-    S["retriever"] = Retriever(cfg["analytics_db"], cfg["vectors"], emb)
+    S["retriever"] = Retriever(cfg["analytics_db"], cfg["vectors"], LazyEmbedder(cfg["embedder"], threads=2))
     S["agent"] = Agent(cfg, S["retriever"], a.llm, os.environ.get("EDGEINFER_API_KEY"))
     if not (state / "users.json").exists():
         print(f"!! no users yet: python -m apps.analyst.auth set-password <user> --users {state / 'users.json'}")

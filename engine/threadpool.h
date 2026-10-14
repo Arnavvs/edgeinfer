@@ -3,7 +3,7 @@
 // Workers spin (with PAUSE) for a short while after each job, so the many
 // small parallel ops of one forward pass dispatch in about a microsecond;
 // after ~1 ms without work they sleep on a condition variable, so an idle
-// server costs no CPU (this laptop also runs the phone rig).
+// server costs no CPU (the laptop also runs other jobs).
 #pragma once
 
 #include <atomic>

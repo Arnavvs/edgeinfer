@@ -44,6 +44,8 @@ select{font:inherit;padding:5px 8px;border-radius:8px;border:1px solid var(--lin
 .err{color:var(--err)}.mut{color:var(--mut)}
 .perf{font-size:12px;color:var(--mut);margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 12px}
 .perf b{color:var(--tx2);font-weight:600}
+.fb{display:inline-flex;gap:4px;margin-left:auto}.fb button{padding:1px 7px;font-size:12px;border-radius:6px;color:var(--mut)}
+.fb button.on{color:var(--acc);border-color:var(--acc)}
 .cursor::after{content:"▍";animation:b 1s steps(1) infinite;color:var(--acc)}@keyframes b{50%{opacity:0}}
 .starters{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin:12px 0}
 .starters button{text-align:left;padding:10px 12px;border-radius:10px;color:var(--tx2)}
@@ -172,7 +174,11 @@ async function send(ev){
       else if(e.type==='tool'){box.querySelector('.steps').append(el(toolCard(e)))}
       else if(e.type==='step'){steps.push(e.timing||{})}
       else if(e.type==='error'){box.querySelector('.bubble').innerHTML+=`<p class="err">${esc(e.message)}</p>`}
-      else if(e.type==='done'){box.querySelector('.foot').innerHTML=perfLine(e.totals,e.model,steps)}
+      else if(e.type==='done'){box.querySelector('.foot').innerHTML=perfLine(e.totals,e.model,steps);
+        const perf=box.querySelector('.perf');const fb=el('<span class="fb"><button title="good answer">👍</button><button title="wrong or unhelpful">👎</button></span>');
+        perf.append(fb);fb.querySelectorAll('button').forEach((b,k)=>b.onclick=async()=>{
+          fb.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+          await fetch('/api/feedback',{method:'POST',headers:H,body:JSON.stringify({conversation:conv,question:q,answer:text,rating:k?-1:1,model:e.model})})})}
       scroll()}}
   box.querySelector('.bubble').classList.remove('cursor');
   busy=false;$('#send').disabled=false;loadConvs();$('#q').focus();
