@@ -15,7 +15,9 @@ Endpoints
   POST /admin/load, /admin/unload
 
 One model is resident at a time (the box has 8 GB and also runs other jobs);
-it loads on first use and unloads after `idle_unload_s` without requests.
+it loads on first use and unloads after `idle_unload_s` without requests. A
+request for another model waits until the resident one has no requests in
+flight (up to `swap_wait_s`, then 503), so a swap never cuts off an answer.
 """
 from __future__ import annotations
 
@@ -46,26 +48,45 @@ class Manager:
         self.specs = {m["name"]: m for m in cfg["models"]}
         self.default = cfg.get("default") or cfg["models"][0]["name"]
         self.idle = float(cfg.get("idle_unload_s", 900))
+        self.swap_wait = float(cfg.get("swap_wait_s", 180))
         self.name: str | None = None
         self.sched: Scheduler | None = None
         self.model: Model | None = None
         self.tok: ChatTokenizer | None = None
         self.loaded_at = 0.0
         self.load_s = 0.0
-        self.lock = threading.Lock()
+        self.cv = threading.Condition()
+        self.pending = 0  # acquired and not yet submitted to the scheduler
 
-    def get(self, name: str | None) -> tuple[Scheduler, ChatTokenizer, str]:
+    def _in_use(self) -> bool:
+        return self.pending > 0 or (self.sched is not None and self.sched.busy())
+
+    def acquire(self, name: str | None) -> tuple[Scheduler, ChatTokenizer, str]:
+        """Makes `name` resident and holds it until release(), which callers make
+        right after sched.submit(); from then on the scheduler counts the request."""
         name = name or self.default
         if name not in self.specs:
             # accept aliases like "qwen3.5" -> default
             name = self.default if name in ("default", "", None) else name
         if name not in self.specs:
             raise HTTPException(404, f"unknown model {name!r}; available: {sorted(self.specs)}")
-        with self.lock:
+        deadline = time.time() + self.swap_wait
+        with self.cv:
+            while self.name not in (None, name) and self._in_use():
+                left = deadline - time.time()
+                if left <= 0:
+                    raise HTTPException(503, f"{self.name} is answering another request; try again shortly")
+                self.cv.wait(min(left, 0.25))  # the scheduler does not notify, so poll
             if self.name != name:
                 self._unload()
                 self._load(name)
+            self.pending += 1
             return self.sched, self.tok, name
+
+    def release(self) -> None:
+        with self.cv:
+            self.pending -= 1
+            self.cv.notify_all()
 
     def _load(self, name: str) -> None:
         s = self.specs[name]
@@ -94,12 +115,12 @@ class Manager:
         self.name = None
 
     def unload(self) -> None:
-        with self.lock:
+        with self.cv:
             self._unload()
 
     def maybe_idle_unload(self) -> None:
-        with self.lock:
-            if self.sched and not self.sched.busy() and time.time() - self.sched.last_activity > self.idle:
+        with self.cv:
+            if self.sched and not self._in_use() and time.time() - self.sched.last_activity > self.idle:
                 self._unload()
 
 
@@ -116,7 +137,8 @@ async def lifespan(app):
             await asyncio.to_thread(MANAGER.maybe_idle_unload)
     t = asyncio.create_task(idle_task())
     if MANAGER.cfg.get("preload"):
-        await asyncio.to_thread(MANAGER.get, None)
+        await asyncio.to_thread(MANAGER.acquire, None)
+        MANAGER.release()
     yield
     t.cancel()
     MANAGER.unload()
@@ -139,12 +161,18 @@ def sampling_from(body: dict) -> SamplingParams:
         seed=int(g("seed") or 0))
 
 
-async def run_request(sched: Scheduler, req: Request):
-    """Submits and yields scheduler events as they arrive."""
+def start(sched: Scheduler, req: Request) -> asyncio.Queue:
+    """Submits now (not when a stream is first read), so the model cannot be
+    swapped out between MANAGER.release() and the scheduler seeing the request."""
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
     req.emit = lambda e: loop.call_soon_threadsafe(q.put_nowait, e)
     sched.submit(req)
+    return q
+
+
+async def run_request(sched: Scheduler, req: Request, q: asyncio.Queue):
+    """Yields scheduler events as they arrive; cancels the request if abandoned."""
     try:
         while True:
             e = await q.get()
@@ -164,7 +192,6 @@ def sse(obj) -> str:
 async def chat_completions(http: HTTPRequest):
     check_auth(http)
     body = await http.json()
-    sched, tok, name = await asyncio.to_thread(MANAGER.get, body.get("model"))
     messages = body.get("messages") or []
     tools = body.get("tools") or None
     kw = body.get("chat_template_kwargs") or {}
@@ -174,13 +201,18 @@ async def chat_completions(http: HTTPRequest):
         text = render(messages, tools, True, thinking, keep_think)
     except (ValueError, KeyError, TypeError) as e:
         raise HTTPException(400, f"bad messages: {e}")
-    prompt = tok.encode(text)
     stop = body.get("stop") or []
     stop = [stop] if isinstance(stop, str) else list(stop)
-    req = Request(prompt=prompt, params=sampling_from(body),
-                  max_tokens=int(body.get("max_completion_tokens") or body.get("max_tokens") or 1024),
-                  stop=stop, spec=bool(body.get("speculative", True)),
-                  snap_at=cache_marks(tok, messages, prompt, tools, keep_think))
+    sched, tok, name = await asyncio.to_thread(MANAGER.acquire, body.get("model"))
+    try:
+        prompt = tok.encode(text)
+        req = Request(prompt=prompt, params=sampling_from(body),
+                      max_tokens=int(body.get("max_completion_tokens") or body.get("max_tokens") or 1024),
+                      stop=stop, spec=bool(body.get("speculative", True)),
+                      snap_at=cache_marks(tok, messages, prompt, tools, keep_think))
+        q = start(sched, req)
+    finally:
+        MANAGER.release()
     rid = "chatcmpl-" + uuid.uuid4().hex[:16]
     created = int(time.time())
     include_usage = bool((body.get("stream_options") or {}).get("include_usage"))
@@ -191,7 +223,7 @@ async def chat_completions(http: HTTPRequest):
             yield sse({**head, "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""},
                                             "finish_reason": None}]})
             full, in_think, tool_mode = "", thinking, False
-            async for e in run_request(sched, req):
+            async for e in run_request(sched, req, q):
                 if e["type"] == "token":
                     full += e["text"]
                     delta = e["text"]
@@ -233,7 +265,7 @@ async def chat_completions(http: HTTPRequest):
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     full, done = "", None
-    async for e in run_request(sched, req):
+    async for e in run_request(sched, req, q):
         if e["type"] == "token":
             full += e["text"]
         elif e["type"] == "error":
@@ -257,16 +289,20 @@ async def chat_completions(http: HTTPRequest):
 async def completions(http: HTTPRequest):
     check_auth(http)
     body = await http.json()
-    sched, tok, name = await asyncio.to_thread(MANAGER.get, body.get("model"))
-    prompt = body.get("prompt", "")
-    ids = prompt if isinstance(prompt, list) else tok.encode(prompt)
-    stop = body.get("stop") or []
-    req = Request(prompt=ids, params=sampling_from(body), max_tokens=int(body.get("max_tokens") or 256),
-                  stop=[stop] if isinstance(stop, str) else list(stop), spec=bool(body.get("speculative", True)))
+    sched, tok, name = await asyncio.to_thread(MANAGER.acquire, body.get("model"))
+    try:
+        prompt = body.get("prompt", "")
+        ids = prompt if isinstance(prompt, list) else tok.encode(prompt)
+        stop = body.get("stop") or []
+        req = Request(prompt=ids, params=sampling_from(body), max_tokens=int(body.get("max_tokens") or 256),
+                      stop=[stop] if isinstance(stop, str) else list(stop), spec=bool(body.get("speculative", True)))
+        q = start(sched, req)
+    finally:
+        MANAGER.release()
     rid, created = "cmpl-" + uuid.uuid4().hex[:16], int(time.time())
     if body.get("stream"):
         async def gen():
-            async for e in run_request(sched, req):
+            async for e in run_request(sched, req, q):
                 if e["type"] == "token":
                     yield sse({"id": rid, "object": "text_completion", "created": created, "model": name,
                                "choices": [{"index": 0, "text": e["text"], "finish_reason": None}]})
@@ -277,7 +313,7 @@ async def completions(http: HTTPRequest):
             yield "data: [DONE]\n\n"
         return StreamingResponse(gen(), media_type="text/event-stream")
     text, done = "", None
-    async for e in run_request(sched, req):
+    async for e in run_request(sched, req, q):
         if e["type"] == "token":
             text += e["text"]
         elif e["type"] == "error":
@@ -364,7 +400,8 @@ async def metrics():
 async def admin_load(http: HTTPRequest):
     check_auth(http)
     body = await http.json()
-    _, _, name = await asyncio.to_thread(MANAGER.get, body.get("model"))
+    _, _, name = await asyncio.to_thread(MANAGER.acquire, body.get("model"))
+    MANAGER.release()
     return {"loaded": name, "load_s": round(MANAGER.load_s, 2)}
 
 

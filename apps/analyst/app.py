@@ -138,7 +138,7 @@ def login_html(msg: str = "") -> str:
     html = (HERE / "static" / "login.html").read_text()
     g = S["public"].get("guest")
     hint = (f'<p class="hint">Recruiter / guest login: <code>{g["user"]}</code> / <code>{g["password"]}</code> '
-            f'({account(g["user"]).get("per_hour", "unlimited")} questions per hour, demo data)</p>') if g else ""
+            f'({account(g["user"]).get("per_hour", "unlimited")} questions per hour)</p>') if g else ""
     return html.replace("<!--msg-->", msg).replace("<!--hint-->", hint)
 
 

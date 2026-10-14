@@ -119,6 +119,7 @@ class Scheduler:
         self.disk: list[DiskSnap] = []
         self.waiting: queue.Queue[Request] = queue.Queue()
         self.active: list[Request] = []
+        self.inflight: list[Request] = []  # submitted and not yet done; read by busy()
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.stop_flag = False
@@ -136,6 +137,8 @@ class Scheduler:
     def submit(self, req: Request) -> Request:
         req.decoder = StreamDecoder(self.tok)
         req.rng = C.c_uint64(req.params.seed or (time.time_ns() & 0xFFFFFFFFFFFF))
+        with self.lock:
+            self.inflight.append(req)
         self.waiting.put(req)
         self.wake.set()
         return req
@@ -151,7 +154,10 @@ class Scheduler:
         self.ctx.close()
 
     def busy(self) -> bool:
-        return bool(self.active) or not self.waiting.empty()
+        # Not `active or waiting`: a request is in neither while _admit places it.
+        with self.lock:
+            self.inflight = [r for r in self.inflight if r.state != "done"]
+            return bool(self.inflight)
 
     def snapshot_info(self) -> list[dict]:
         out = []

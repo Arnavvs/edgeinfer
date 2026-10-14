@@ -5,7 +5,8 @@ Gated-DeltaNet language models (Qwen3.5), built for a 2017 laptop with no GPU.**
 It also includes a login-protected "chat with your data" app (SQL + hybrid RAG) that runs on it.
 
 **Live demo:** https://orchestrator.taila27abc.ts.net:8443/ (served from the laptop itself through Tailscale
-Funnel; sign in with the guest account shown on the page, 16 questions per hour, demo data + plain chat).
+Funnel; sign in with the guest account shown on the page: 16 questions per hour, all three models, the
+collected data, the demo data and plain chat).
 Portfolio: https://arnavvs.github.io/
 
 Target machine: Intel Core i5-7300U, 2 cores / 4 threads, AVX2, turbo off (2.6 GHz),
