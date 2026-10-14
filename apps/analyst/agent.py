@@ -142,12 +142,13 @@ class Agent:
         ex = "\n".join(f"Q: {e['question']}\nsql: {e['sql']}" for e in self.cfg.get("examples", []))
         self.system = SYSTEM.format(schema="Tables (SQLite):\n" + schema, sources=sources, examples=ex or "(none)")
 
-    async def _complete(self, client: httpx.AsyncClient, messages, model, tools, emit, step) -> dict:
+    async def _complete(self, client: httpx.AsyncClient, messages, model, tools, emit, step,
+                        max_tokens: int = 900) -> dict:
         # small models loop on repetitive SQL at low temperature; a mild repetition
         # penalty fixes it (presence penalty would also punish markdown table pipes)
         sampling = {"temperature": 0.3, "top_p": 0.9, "top_k": 20, "repetition_penalty": 1.08,
                     **self.cfg.get("sampling", {})}
-        body = {"model": model, "messages": messages, "stream": True, "max_tokens": 900,
+        body = {"model": model, "messages": messages, "stream": True, "max_tokens": max_tokens,
                 "stream_options": {"include_usage": True}, **sampling}
         if tools:
             body["tools"] = tools
@@ -176,7 +177,7 @@ class Agent:
         return {"content": content, "tool_calls": calls, "timing": timing, "usage": usage, "finish": finish}
 
     async def run(self, history: list[dict], question: str, model: str,
-                  emit: Callable[[dict], Awaitable[None]], max_steps: int = 4) -> list[dict]:
+                  emit: Callable[[dict], Awaitable[None]], max_steps: int = 4, max_tokens: int = 900) -> list[dict]:
         if Path(self.sql.path).stat().st_mtime != self.db_mtime:  # nightly rebuild: new row counts
             self.refresh()
         msgs = [{"role": "system", "content": self.system}] + history + [{"role": "user", "content": question}]
@@ -187,7 +188,8 @@ class Agent:
         async with httpx.AsyncClient() as client:
             for step in range(max_steps):
                 t0 = time.time()
-                res = await self._complete(client, msgs, model, TOOLS if step < max_steps - 1 else None, emit, step)
+                res = await self._complete(client, msgs, model, TOOLS if step < max_steps - 1 else None, emit, step,
+                                           max_tokens)
                 totals["steps"] += 1
                 totals["llm_s"] += time.time() - t0
                 u, tm = res["usage"], res["timing"]
@@ -237,3 +239,36 @@ class Agent:
         totals["tool_s"] = round(totals["tool_s"], 3)
         await emit({"type": "done", "totals": totals, "model": model})
         return new
+
+
+CHAT_SYSTEM = ("You are the demo assistant of edgeinfer, an LLM inference engine written from scratch in C++ that "
+               "runs Qwen3.5 on a 2017 dual-core laptop CPU with no GPU. Answer clearly and concisely. If asked about "
+               "yourself: you are Qwen3.5 served by edgeinfer, with 4-bit weights, speculative decoding and prefix "
+               "caching, built by Arnav Vashishtha.")
+
+
+class ChatAgent(Agent):
+    """Plain chat with the model: same streaming and accounting, no tools."""
+
+    def __init__(self, llm_url: str, api_key: str | None = None):
+        self.cfg = {}
+        self.url = llm_url.rstrip("/")
+        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self.system = CHAT_SYSTEM
+
+    def refresh(self) -> None:
+        pass
+
+    async def run(self, history, question, model, emit, max_steps: int = 1, max_tokens: int = 900):
+        msgs = [{"role": "system", "content": self.system}] + history + [{"role": "user", "content": question}]
+        t0 = time.time()
+        async with httpx.AsyncClient() as client:
+            res = await self._complete(client, msgs, model, None, emit, 0, max_tokens)
+        u, tm = res["usage"], res["timing"]
+        await emit({"type": "step", "step": 0, "timing": tm, "usage": u})
+        await emit({"type": "done", "model": model, "totals": {
+            "steps": 1, "prompt_tokens": u.get("prompt_tokens", 0),
+            "cached_tokens": (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0),
+            "completion_tokens": u.get("completion_tokens", 0), "llm_s": round(time.time() - t0, 2), "tool_s": 0,
+            "ttft_s": tm.get("ttft_s"), "total_s": round(time.time() - t0, 2)}})
+        return [{"role": "assistant", "content": res["content"]}]

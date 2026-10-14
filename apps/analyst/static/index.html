@@ -50,6 +50,9 @@ select{font:inherit;padding:5px 8px;border-radius:8px;border:1px solid var(--lin
 .starters{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin:12px 0}
 .starters button{text-align:left;padding:10px 12px;border-radius:10px;color:var(--tx2)}
 .hero{margin:6vh 0 16px}.hero h2{margin:0 0 4px;font-size:22px}
+.quota{font-size:12px;color:var(--mut);white-space:nowrap}.quota.low{color:var(--err)}
+.wtag{font-size:10.5px;padding:0 6px;border-radius:6px;background:var(--card);border:1px solid var(--line);color:var(--mut);margin-right:5px}
+aside header a{font-size:12px;color:var(--mut);text-decoration:none}aside header a:hover{color:var(--acc)}
 form#ask{border-top:1px solid var(--line);background:var(--panel);padding:10px 16px 14px}
 form#ask .wrap{display:flex;gap:8px;align-items:flex-end}
 textarea{flex:1;resize:none;max-height:180px;min-height:44px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
@@ -59,7 +62,7 @@ textarea:focus{outline:2px solid var(--acc);outline-offset:-1px}
  aside.open{transform:none}#menu{display:inline-block}}
 </style></head><body>
 <aside id="side">
-  <header><h1>Data Desk</h1><button class="primary" id="new">New</button></header>
+  <header><h1>Data Desk</h1><a href="/" title="about edgeinfer">edgeinfer ↗</a><button class="primary" id="new">New</button></header>
   <div id="convs"></div>
   <footer><span id="who"></span><form method="post" action="/logout"><button type="submit">Sign out</button></form></footer>
 </aside>
@@ -67,6 +70,8 @@ textarea:focus{outline:2px solid var(--acc);outline-offset:-1px}
   <div class="top">
     <button id="menu" aria-label="conversations">☰</button>
     <div class="title" id="title">New conversation</div>
+    <span class="quota" id="quota"></span>
+    <label class="mut" for="ws">ask</label><select id="ws"></select>
     <label class="mut" for="model">model</label><select id="model"></select>
   </div>
   <div id="log"><div class="wrap" id="msgs"></div></div>
@@ -78,6 +83,10 @@ textarea:focus{outline:2px solid var(--acc);outline-offset:-1px}
 const $=s=>document.querySelector(s);
 const esc=s=>(s??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let conv=null, busy=false, ME=null;
+const wsInfo=()=>ME.workspaces.find(w=>w.id===$('#ws').value)||ME.workspaces[0];
+function showQuota(){const q=ME.quota,el=$('#quota');if(!q){el.textContent='';return}
+  el.textContent=`${q.left} of ${q.per_hour} questions left this hour`;el.classList.toggle('low',q.left<=3)}
+async function refreshMe(){const r=await fetch('/api/me');if(r.ok){ME=await r.json();showQuota()}}
 const H={'X-Requested-With':'datadesk','Content-Type':'application/json'};
 
 // small, safe markdown: input is escaped first, then a few constructs are re-enabled
@@ -140,18 +149,25 @@ function renderStored(msgs){
   scroll();
 }
 function hero(){
-  const s=(ME.starters||[]).map(q=>`<button type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('');
-  $('#msgs').innerHTML=`<div class="hero"><h2>Ask about ${esc(ME.dataset)}</h2><div class="mut">Answers come from a local model that queries your data with SQL and search; every step is shown.</div></div><div class="starters">${s}</div>`;
+  const w=wsInfo();
+  const s=(w.starters||[]).map(q=>`<button type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('');
+  const sub=w.kind==='chat'?'Plain chat with Qwen3.5, served by edgeinfer on a 2017 laptop CPU.'
+    :'Answers come from a local model that queries the data with SQL and search; every step is shown.';
+  $('#msgs').innerHTML=`<div class="hero"><h2>${w.kind==='chat'?'Chat with the model':'Ask about '+esc(w.title)}</h2><div class="mut">${sub}</div></div><div class="starters">${s}</div>`;
+  $('#q').placeholder=w.kind==='chat'?'Message the model…  (Enter to send, Shift+Enter for a new line)':'Ask about the data…  (Enter to send, Shift+Enter for a new line)';
   document.querySelectorAll('.starters button').forEach(b=>b.onclick=()=>{$('#q').value=b.dataset.q;send()});
 }
 async function loadConvs(){
   const r=await fetch('/api/conversations');if(r.status===401){location='/login';return}
   const cs=await r.json();
-  $('#convs').innerHTML=cs.map(c=>`<div class="conv${c.id===conv?' on':''}" data-id="${c.id}" title="${esc(c.title)}">${esc(c.title)}</div>`).join('')||'<div class="mut" style="padding:8px">No conversations yet</div>';
+  const many=ME.workspaces.length>1;
+  $('#convs').innerHTML=cs.map(c=>`<div class="conv${c.id===conv?' on':''}" data-id="${c.id}" title="${esc(c.title)}">${many&&c.workspace?`<span class="wtag">${esc(c.workspace)}</span>`:''}${esc(c.title)}</div>`).join('')||'<div class="mut" style="padding:8px">No conversations yet</div>';
   document.querySelectorAll('.conv').forEach(d=>d.onclick=()=>openConv(d.dataset.id));
 }
 async function openConv(id){
   if(busy)return;conv=id;const r=await fetch('/api/conversations/'+id);const c=await r.json();
+  if(c.workspace&&ME.workspaces.some(w=>w.id===c.workspace))$('#ws').value=c.workspace;
+  $('#ws').disabled=true;
   $('#title').textContent=c.title;renderStored(c.messages);loadConvs();$('#side').classList.remove('open');
 }
 async function send(ev){
@@ -162,13 +178,14 @@ async function send(ev){
   const box=el('<div class="msg"><div class="steps"></div><div class="bubble cursor"></div><div class="foot"></div></div>');
   $('#msgs').append(box);scroll();
   let text='',steps=[];
-  const r=await fetch('/api/chat',{method:'POST',headers:H,body:JSON.stringify({message:q,conversation:conv,model:$('#model').value})});
-  if(!r.ok){box.querySelector('.bubble').innerHTML=`<span class="err">${esc(await r.text())}</span>`;busy=false;$('#send').disabled=false;return}
+  const r=await fetch('/api/chat',{method:'POST',headers:H,body:JSON.stringify({message:q,conversation:conv,model:$('#model').value,workspace:$('#ws').value})});
+  if(!r.ok){let m=await r.text();try{m=JSON.parse(m).error||m}catch(e){}
+    box.querySelector('.bubble').classList.remove('cursor');box.querySelector('.bubble').innerHTML=`<span class="err">${esc(m)}</span>`;busy=false;$('#send').disabled=false;refreshMe();return}
   const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
   while(true){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});
     let i;while((i=buf.indexOf('\n\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+2);if(!line.startsWith('data: '))continue;
       const e=JSON.parse(line.slice(6));
-      if(e.type==='conversation'){if(!conv){conv=e.id;$('#title').textContent=q.slice(0,80)}}
+      if(e.type==='conversation'){if(!conv){conv=e.id;$('#title').textContent=q.slice(0,80);$('#ws').disabled=true}}
       else if(e.type==='token'){text+=e.text;box.querySelector('.bubble').innerHTML=md(text)}
       else if(e.type==='tool_intent'){if(e.text.trim())box.querySelector('.steps').append(el(`<div class="mut" style="font-size:13px">${esc(e.text)}</div>`));text='';box.querySelector('.bubble').innerHTML=''}
       else if(e.type==='tool'){box.querySelector('.steps').append(el(toolCard(e)))}
@@ -181,18 +198,22 @@ async function send(ev){
           await fetch('/api/feedback',{method:'POST',headers:H,body:JSON.stringify({conversation:conv,question:q,answer:text,rating:k?-1:1,model:e.model})})})}
       scroll()}}
   box.querySelector('.bubble').classList.remove('cursor');
-  busy=false;$('#send').disabled=false;loadConvs();$('#q').focus();
+  busy=false;$('#send').disabled=false;loadConvs();refreshMe();$('#q').focus();
 }
 $('#ask').onsubmit=send;
 $('#q').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 $('#q').addEventListener('input',e=>{e.target.style.height='auto';e.target.style.height=Math.min(180,e.target.scrollHeight)+'px'});
-$('#new').onclick=()=>{if(busy)return;conv=null;$('#title').textContent='New conversation';hero();loadConvs();$('#side').classList.remove('open')};
+$('#new').onclick=()=>{if(busy)return;conv=null;$('#ws').disabled=false;$('#title').textContent='New conversation';hero();loadConvs();$('#side').classList.remove('open')};
+$('#ws').onchange=()=>{if(!conv)hero()};
 $('#menu').onclick=()=>$('#side').classList.toggle('open');
 (async()=>{
   const r=await fetch('/api/me');if(r.status===401){location='/login';return}ME=await r.json();
-  $('#who').textContent=ME.user;
+  $('#who').textContent=ME.user+(ME.guest?' (guest)':'');
+  $('#ws').innerHTML=ME.workspaces.map(w=>`<option value="${esc(w.id)}">${esc(w.kind==='chat'?'the model':w.title)}</option>`).join('');
+  if(ME.workspaces.length<2){$('#ws').hidden=true;$('label[for=ws]').hidden=true}
   const m=await (await fetch('/api/models')).json();
   $('#model').innerHTML=(m.data||[]).map(x=>`<option value="${esc(x.id)}"${x.id===ME.default_model?' selected':''}>${esc(x.id)}${x.loaded?' ●':''}</option>`).join('');
-  hero();loadConvs();
+  if((m.data||[]).length<2)$('#model').disabled=true;
+  showQuota();hero();loadConvs();
 })();
 </script></body></html>

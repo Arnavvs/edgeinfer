@@ -4,6 +4,10 @@
 Gated-DeltaNet language models (Qwen3.5), built for a 2017 laptop with no GPU.**
 It also includes a login-protected "chat with your data" app (SQL + hybrid RAG) that runs on it.
 
+**Live demo:** https://orchestrator.taila27abc.ts.net:8443/ (served from the laptop itself through Tailscale
+Funnel; sign in with the guest account shown on the page, 16 questions per hour, demo data + plain chat).
+Portfolio: https://arnavvs.github.io/
+
 Target machine: Intel Core i5-7300U, 2 cores / 4 threads, AVX2, turbo off (2.6 GHz),
 8 GB single-channel DDR4, Debian 13. The same box runs other always-on jobs, so the server
 runs at low CPU priority and unloads the model when idle.
@@ -126,6 +130,14 @@ make serve                      # OpenAI API on 127.0.0.1:8091
 curl -s localhost:8091/v1/chat/completions -H 'content-type: application/json' \
   -d '{"messages":[{"role":"user","content":"Hello!"}],"stream":false}'
 ```
+
+### Running the site
+
+`apps/analyst/app.py` serves a public project page at `/` and the login-protected chat at `/app`. A site
+config lists workspaces (a dataset config, or `"chat"` for plain chat with the model) and per-account rules:
+which workspaces an account may use, a questions-per-hour cap, allowed models, a token cap and concurrency.
+Caps are counted in SQLite, so they survive restarts. Behind a reverse proxy (Tailscale Serve/Funnel) the app
+uses `X-Forwarded-For` for per-visitor login limits and marks cookies `Secure` from `X-Forwarded-Proto`.
 
 Data Desk on the synthetic demo data: `make demo`, then
 `python -m apps.analyst.auth set-password me` and

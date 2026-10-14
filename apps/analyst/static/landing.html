@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>edgeinfer</title>
+<meta name="description" content="A from-scratch C++ LLM inference engine for Qwen3.5, running live on a 2017 laptop CPU. Benchmarks against llama.cpp and Ollama, and a chat-with-your-data demo.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* One column, spec-sheet feel: the machine is the protagonist, numbers in mono. */
+:root{--bg:#f4f5f7;--surface:#fff;--ink:#14171d;--ink2:#3f4652;--muted:#6b7280;--line:#dde1e7;
+ --accent:#2f5bd3;--accent-soft:#e6edfc;--base:#c27420;--good:#1f7a50;
+ --display:"Schibsted Grotesk","Segoe UI",system-ui,sans-serif;--body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+ --mono:"JetBrains Mono",ui-monospace,"Cascadia Mono",Consolas,monospace}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111318;--surface:#191c23;--ink:#eceef2;--ink2:#c3c8d2;
+ --muted:#8e95a3;--line:#2b303a;--accent:#7ea3ff;--accent-soft:#1d2740;--base:#e3a15a;--good:#5cc495;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111318;--surface:#191c23;--ink:#eceef2;--ink2:#c3c8d2;--muted:#8e95a3;--line:#2b303a;
+ --accent:#7ea3ff;--accent-soft:#1d2740;--base:#e3a15a;--good:#5cc495;color-scheme:dark}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 var(--body);padding:env(safe-area-inset-top,0) 16px env(safe-area-inset-bottom,0)}
+.wrap{max-width:920px;margin:0 auto}
+nav{display:flex;align-items:center;gap:18px;padding-block:18px;flex-wrap:wrap}
+nav .mark{font:800 1.15rem/1 var(--display);letter-spacing:-.02em;color:var(--ink);text-decoration:none;margin-right:auto}
+nav .mark span{color:var(--accent)}
+nav a{color:var(--ink2);text-decoration:none;font-size:.95rem}nav a:hover{color:var(--accent)}
+main{display:grid;gap:56px;padding-block:20px 72px}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:-.015em}
+h1{font-size:clamp(2.1rem,6vw,3.4rem);line-height:1.05;font-weight:800}
+h2{font-size:1.55rem;font-weight:700}h3{font-size:1.05rem;font-weight:700}
+p{margin:0;max-width:66ch;color:var(--ink2)}a{color:var(--accent)}
+code,.mono{font-family:var(--mono);font-size:.86em}
+.eyebrow{font:600 .74rem/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+section{display:grid;gap:16px;min-width:0}
+.hero{display:grid;gap:18px}.hero p.lead{font-size:1.18rem}
+.status{display:inline-flex;align-items:center;gap:8px;font:600 .8rem/1 var(--mono);color:var(--ink2);background:var(--surface);
+ border:1px solid var(--line);border-radius:999px;padding:7px 12px;justify-self:start;max-width:100%;flex-wrap:wrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 25%,transparent)}
+.ctas{display:flex;gap:10px;flex-wrap:wrap}
+.btn{display:inline-block;font:600 .98rem/1 var(--body);padding:12px 18px;border-radius:9px;text-decoration:none;border:1px solid var(--line);color:var(--ink);background:var(--surface)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.spec{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.spec div{background:var(--surface);padding:10px 14px;display:grid;gap:2px}
+.spec span{font:600 .68rem/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.spec b{font:600 .95rem/1.3 var(--mono)}
+.figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+.fig{border-top:3px solid var(--accent);padding-top:10px;display:grid;gap:4px;min-width:0}
+.fig b{font:700 1.85rem/1.1 var(--display);font-variant-numeric:tabular-nums}.fig span{color:var(--ink2);font-size:.94rem}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font:600 .7rem/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}tr:last-child td{border-bottom:0}
+td.us{color:var(--accent);font-weight:600}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:6px;align-content:start;min-width:0}
+.card p{font-size:.95rem}
+.try{background:var(--surface);border:1px solid var(--accent);border-radius:12px;padding:20px;display:grid;gap:12px}
+.cred{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-family:var(--mono)}
+.cred code{background:var(--accent-soft);color:var(--accent);padding:5px 9px;border-radius:6px;font-size:.95rem}
+.note{font-size:.88rem;color:var(--muted)}
+footer{border-top:1px solid var(--line);padding-block:22px 34px;display:flex;gap:16px;flex-wrap:wrap;font-size:.92rem;color:var(--muted)}
+footer a{color:var(--ink2)}
+@media(max-width:520px){body{font-size:16px}main{gap:44px}.fig b{font-size:1.55rem}}
+</style></head><body>
+<div class="wrap">
+<nav aria-label="primary"><a class="mark" href="/">edge<span>infer</span></a>
+  <a href="#results">Results</a><a href="#how">How it works</a><a href="#try">Try it</a><a id="gh" href="https://github.com/Arnavvs/edgeinfer">GitHub</a></nav>
+<main>
+  <section class="hero">
+    <div class="eyebrow">Live on a 2017 laptop · no GPU</div>
+    <h1>An LLM inference engine, written from scratch for two CPU cores.</h1>
+    <p class="lead">edgeinfer runs Qwen3.5 (the hybrid Gated-DeltaNet + attention family) with its own C++ kernels, scheduler and
+      OpenAI-compatible server. On this machine it is faster than llama.cpp and Ollama, and it powers the chat you can try below.</p>
+    <div class="status" id="status"><span class="dot" id="dot"></span><span id="status-text">checking the server…</span></div>
+    <div class="ctas"><a class="btn primary" id="try-btn" href="/login">Try the live demo</a>
+      <a class="btn" href="https://github.com/Arnavvs/edgeinfer">Source on GitHub</a><a class="btn" id="pf" href="https://arnavvs.github.io/">Portfolio</a></div>
+    <div class="spec" aria-label="the machine this page is served from">
+      <div><span>CPU</span><b>i5-7300U · 2C/4T</b></div><div><span>Clock</span><b>2.6 GHz, turbo off</b></div>
+      <div><span>SIMD</span><b>AVX2 + FMA</b></div><div><span>Memory</span><b>8 GB, 1 channel</b></div>
+      <div><span>GPU</span><b>none</b></div><div><span>Year</span><b>2017</b></div></div>
+  </section>
+
+  <section id="results">
+    <div class="eyebrow">Measured on this laptop</div>
+    <div class="figs">
+      <div class="fig"><b>+11% / +8%</b><span>prompt / generation speed vs llama.cpp (0.8B)</span></div>
+      <div class="fig"><b>+45%</b><span>generation on 4B from self-speculative decoding, output unchanged</span></div>
+      <div class="fig"><b>3.4×</b><span>faster first token than llama-server on follow-up chat turns</span></div>
+      <div class="fig"><b>12 / 12</b><span>data questions answered correctly by the 4B model</span></div>
+    </div>
+    <h2>Same model, same laptop, four engines</h2>
+    <p>Tokens per second, 4 threads, idle machine. llama.cpp (b11606), Ollama (0.40.3) and llama-cpp-python ran the same Q4_K_M GGUF;
+      edgeinfer ran its own 4-bit file of similar size and equal quality (KL divergence 0.022 vs 0.023 on 2B and 4B).</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>model · test</th><th>edgeinfer</th><th>llama.cpp</th><th>Ollama</th><th>llama-cpp-python</th></tr></thead>
+      <tbody>
+        <tr><td>0.8B · prompt</td><td class="n us">98.5</td><td class="n">88.8</td><td class="n">85.6</td><td class="n">64.6</td></tr>
+        <tr><td>0.8B · generate</td><td class="n us">20.9</td><td class="n">19.4</td><td class="n">18.8</td><td class="n">17.4</td></tr>
+        <tr><td>0.8B · generate at 4K context</td><td class="n us">18.6</td><td class="n">13.0</td><td class="n">13.9</td><td class="n">15.6</td></tr>
+        <tr><td>2B · prompt</td><td class="n us">39.6</td><td class="n">38.5</td><td class="n">37.6</td><td class="n">29.1</td></tr>
+        <tr><td>2B · generate</td><td class="n us">9.9</td><td class="n">9.6</td><td class="n">9.5</td><td class="n">9.2</td></tr>
+        <tr><td>4B · prompt</td><td class="n us">15.3</td><td class="n">15.2</td><td class="n">15.0</td><td class="n">11.7</td></tr>
+        <tr><td>4B · generate</td><td class="n us">4.5</td><td class="n">4.3</td><td class="n">4.3</td><td class="n">4.3</td></tr>
+        <tr><td>4B · generate with drafting</td><td class="n us">6.9</td><td class="n">–</td><td class="n">–</td><td class="n">–</td></tr>
+        <tr><td>peak RAM, 4B (MB)</td><td class="n us">3,323</td><td class="n">4,465</td><td class="n">3,485</td><td class="n">4,920</td></tr>
+      </tbody></table></div>
+    <h2>Chat turns stay fast</h2>
+    <p>A chat client resends the whole conversation every turn. With a 1.8K-token system prompt, time to first token on turns 2 to 5:</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>server</th><th>0.8B</th><th>2B</th><th>2 users, total tok/s (0.8B)</th></tr></thead>
+      <tbody><tr><td>edgeinfer</td><td class="n us">0.45 s</td><td class="n us">0.94 s</td><td class="n us">30.8</td></tr>
+        <tr><td>llama-server</td><td class="n">1.56 s</td><td class="n">2.99 s</td><td class="n">22.0</td></tr></tbody></table></div>
+    <p class="note">Full method, quality tables and raw logs are in the <a href="https://github.com/Arnavvs/edgeinfer#results">README</a>.</p>
+  </section>
+
+  <section id="how">
+    <div class="eyebrow">How it works</div>
+    <h2>What had to be built</h2>
+    <div class="cols">
+      <div class="card"><h3>The engine</h3><p>C++17 with no dependencies: the Gated DeltaNet recurrence and gated attention, tiled 4/6/8-bit weights,
+        AVX2 integer kernels, its own thread pool. Matches Hugging Face transformers to KL ≈ 1e-7.</p></div>
+      <div class="card"><h3>Quantization</h3><p>Activation-aware calibration, a per-layer sensitivity scan and mixed precision,
+        so 4-bit files keep llama.cpp Q4_K_M quality. The 4-bit kernel sums whole 256-value blocks in integers.</p></div>
+      <div class="card"><h3>Speculative decoding</h3><p>The model's own multi-token-prediction head drafts the next token; one batched pass
+        verifies it. A 32K-token draft vocabulary keeps drafting cheap. Up to +45% on 4B, identical output.</p></div>
+      <div class="card"><h3>Caching a recurrent model</h3><p>DeltaNet state cannot be rewound, so the scheduler snapshots it at chat-turn
+        boundaries and on disk; follow-up turns and restarts skip re-reading the conversation.</p></div>
+      <div class="card"><h3>Serving</h3><p>OpenAI-compatible API with streaming and tool calls, continuous batching, Prometheus metrics,
+        idle unload. Benchmarked against llama.cpp, Ollama, llama-cpp-python and transformers.</p></div>
+      <div class="card"><h3>Data Desk</h3><p>A tool-using agent over SQLite: read-only SQL plus hybrid search (BM25 and multilingual
+        embeddings with rank fusion). Login, per-account quotas, conversation history, feedback.</p></div>
+    </div>
+  </section>
+
+  <section id="try">
+    <div class="eyebrow">Try it</div>
+    <div class="try">
+      <h2>Chat with the engine</h2>
+      <p id="try-text">Sign in with the guest account. You can chat with the model or ask questions about a demo bookshop dataset,
+        and watch the SQL and search steps the agent takes. Everything runs on this one laptop, so answers take 5 to 30 seconds.</p>
+      <div class="cred" id="cred"></div>
+      <div class="ctas"><a class="btn primary" id="try-btn2" href="/login">Open the demo</a></div>
+      <p class="note" id="cap"></p>
+    </div>
+  </section>
+</main>
+<footer><span>Built by Arnav Vashishtha</span><a id="pf2" href="https://arnavvs.github.io/">Portfolio</a>
+  <a href="https://github.com/Arnavvs/edgeinfer">github.com/Arnavvs/edgeinfer</a></footer>
+</div>
+<script>
+const P = __PUBLIC__;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+if (P.github) { $("#gh").href = P.github; }
+if (P.portfolio) { $("#pf").href = P.portfolio; $("#pf2").href = P.portfolio; }
+if (P.signed_in) { ["#try-btn", "#try-btn2"].forEach(s => { $(s).href = "/app"; $(s).textContent = "Open Data Desk"; }); }
+if (P.guest) {
+  $("#cred").innerHTML = `<span>user</span><code>${esc(P.guest.user)}</code><span>password</span><code>${esc(P.guest.password)}</code>`;
+  $("#cap").textContent = P.guest.cap ? `The guest account is limited to ${P.guest.cap} questions per hour, shared by everyone who uses it.` : "";
+} else { $("#cred").hidden = true; }
+async function status() {
+  try {
+    const s = await (await fetch("/api/public/status")).json();
+    if (!s.up) throw 0;
+    $("#dot").classList.add("on");
+    const parts = [s.loaded ? `${s.loaded} loaded` : "server up, model loads on first request"];
+    if (s.requests) parts.push(`${s.requests} requests served since restart`);
+    if (s.decode_tok_s) parts.push(`${s.decode_tok_s} tok/s`);
+    $("#status-text").textContent = parts.join(" · ");
+  } catch (e) { $("#dot").classList.remove("on"); $("#status-text").textContent = "inference server is offline right now"; }
+}
+status(); setInterval(status, 30000);
+</script>
+</body></html>
