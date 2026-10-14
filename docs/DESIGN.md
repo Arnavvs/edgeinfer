@@ -48,6 +48,7 @@ contiguous region and uses every byte of each cache line.
 | `q8` | int8, fp16 scale per 32 | 8.5 |
 | `q4` | symmetric 4-bit stored as `q+8`, fp16 scale per 32 | 4.5 |
 | `q4k` | asymmetric 4-bit `w = d*sc*q - dm*mn`: uint8 scale and min per 32-value sub-block, fp16 `d`, `dm` per 256 | 4.63 |
+| `q6` | symmetric 6-bit (low nibbles + 2-bit high plane), fp16 scale per 32; used for the LM head | 6.5 |
 
 Activations are quantized on the fly to int8 per 32-block, with the block sum
 kept alongside. The inner loop is `vpmaddubsw` (u8 x s8 -> s16 pairs) +
@@ -57,6 +58,10 @@ kept alongside. The inner loop is `vpmaddubsw` (u8 x s8 -> s16 pairs) +
   directly. The offset (`-8` for `q4`, `-dm*mn` for `q4k`) is removed once
   per block from the activation block sums, a single 128-bit FMA for all
   4 rows, instead of the per-pair sign trick.
+* **Integer super-blocks for `q4k`.** Activations for `q4k` weights are quantized per 256 values, so the
+  8-bit sub-block scales become the 16-bit multipliers of `vpmaddwd` (broadcast with one `vpshufb`, on the
+  otherwise idle shuffle port) and the 8 sub-blocks of a super-block accumulate in int32: one int->float
+  conversion and FMA per 256 values instead of per 32. Prompt processing on 0.8B went from 84.6 to 101 tok/s.
 * **4 rows x 2 tokens per microkernel** in prefill, so each expanded weight
   block is reused for two tokens and each activation block for four rows.
   Token blocks are sized to keep the activations in L1/L2 while tiles stream.

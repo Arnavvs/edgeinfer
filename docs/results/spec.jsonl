@@ -1,0 +1,9 @@
+{"model": "qwen3.5-0.8b", "draft": 1, "plain_tok_s": 22.03, "spec_tok_s": 23.85, "acceptance": 0.42}
+{"model": "qwen3.5-0.8b", "draft": 2, "plain_tok_s": 22.63, "spec_tok_s": 19.94, "acceptance": 0.30}
+{"model": "qwen3.5-0.8b", "draft": 3, "plain_tok_s": 21.98, "spec_tok_s": 16.99, "acceptance": 0.22}
+{"model": "qwen3.5-2b", "draft": 1, "plain_tok_s": 10.5, "spec_tok_s": 14.79, "acceptance": 0.72}
+{"model": "qwen3.5-2b", "draft": 2, "plain_tok_s": 10.34, "spec_tok_s": 13.41, "acceptance": 0.60}
+{"model": "qwen3.5-2b", "draft": 3, "plain_tok_s": 10.49, "spec_tok_s": 11.76, "acceptance": 0.45}
+{"model": "qwen3.5-4b", "draft": 1, "plain_tok_s": 4.77, "spec_tok_s": 6.92, "acceptance": 0.70}
+{"model": "qwen3.5-4b", "draft": 2, "plain_tok_s": 4.75, "spec_tok_s": 6.06, "acceptance": 0.58}
+{"model": "qwen3.5-0.8b", "draft": 2, "fr_spec": false, "plain_tok_s": 21.99, "spec_tok_s": 16.4, "acceptance": 0.40}

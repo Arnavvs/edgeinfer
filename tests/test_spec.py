@@ -53,9 +53,14 @@ def main():
     ap.add_argument("hf")
     ap.add_argument("--draft", type=int, default=2)
     ap.add_argument("--tokens", type=int, default=96)
+    ap.add_argument("--draft-vocab", help="npy of token ids for the MTP draft head (FR-Spec)")
+    ap.add_argument("--speed-only", action="store_true", help="skip the cache checks")
     a = ap.parse_args()
     tok = ChatTokenizer(a.hf)
     m = Model(a.model, threads=4)
+    if a.draft_vocab:
+        import numpy as np
+        m.set_draft_vocab(np.load(a.draft_vocab).astype(np.int32))
     ok = True
 
     base = Scheduler(m, tok, n_slots=1, n_ctx=4096, n_draft=0, spec=False)
@@ -79,6 +84,11 @@ def main():
         k = next(i for i, (x, y) in enumerate(zip(got["tokens"], ref["tokens"])) if x != y)
         print("  first difference at token", k, repr(tok.decode(ref["tokens"][k - 3:k + 3])), "vs",
               repr(tok.decode(got["tokens"][k - 3:k + 3])))
+
+    if a.speed_only:
+        sp.shutdown()
+        print("PASS" if ok else "FAIL")
+        return 0 if ok else 1
 
     # follow-up turn: served from the prefix cache, must equal a cold run
     follow = PROMPT + [{"role": "assistant", "content": got["text"]},

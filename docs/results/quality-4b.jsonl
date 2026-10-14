@@ -1,0 +1,4 @@
+{"model": "qwen3.5-4b-q8.eim", "tokens": 1530, "ppl": 9.4977, "kld_mean": 0.0, "kld_p99": 0.0, "top1_agree": 1.0, "score_s": 259.9}
+{"model": "qwen3.5-4b-q4m.eim", "tokens": 1530, "ppl": 9.6517, "kld_mean": 0.02196, "kld_p99": 0.1934, "top1_agree": 0.9242, "score_s": 222.4}
+{"model": "qwen3.5-4b-q4h.eim", "tokens": 1530, "ppl": 9.6655, "kld_mean": 0.02169, "kld_p99": 0.1748, "top1_agree": 0.9275, "score_s": 228.6}
+{"model": "Qwen3.5-4B-Q4_K_M.gguf (llama.cpp)", "tokens": 1530, "ppl": 9.4946, "kld_mean": 0.02287, "kld_p99": 0.1726, "top1_agree": 0.9235, "score_s": 327.6}

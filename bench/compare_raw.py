@@ -175,6 +175,7 @@ def bench_transformers(a):
 
 def bench_ollama(a):
     """Imports the same GGUF into a private Ollama (user-space binary, own model dir)."""
+    import urllib.error
     import urllib.request
     home = HOME / "edgeinfer-data" / "ollama"
     env = {**os.environ, "OLLAMA_MODELS": str(home / "models"), "OLLAMA_HOST": "127.0.0.1:11435",
@@ -199,14 +200,20 @@ def bench_ollama(a):
             tag = "qwen3.5:" + a.name.split("-")[-1].lower()
             run([OLLAMA, "pull", tag], env, timeout=7200)
 
+        # natural prose: Ollama aborts generations that repeat one token ("token repeat limit")
+        words = (HOME / "edgeinfer-data" / "eval" / "wikitext2-test.txt").read_text(encoding="utf-8").split()
+
         def gen(prompt_tokens, n_predict, num_ctx=4800):
-            body = {"model": tag, "prompt": " ".join(["hello"] * prompt_tokens), "raw": True, "stream": False,
+            body = {"model": tag, "prompt": " ".join(words[: int(prompt_tokens / 1.35)]), "raw": True, "stream": False,
                     "options": {"num_predict": n_predict, "num_thread": a.threads, "temperature": 0,
                                 "num_ctx": num_ctx, "seed": 1}}
             req = urllib.request.Request("http://127.0.0.1:11435/api/generate", json.dumps(body).encode(),
                                          {"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=3600) as r:
-                return json.loads(r.read())
+            try:
+                with urllib.request.urlopen(req, timeout=3600) as r:
+                    return json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                raise RuntimeError(f"ollama {e.code}: {e.read()[:300]!r}") from None
         gen(8, 4)  # load
         d = gen(512, 128)
         rows = [("pp512", d["prompt_eval_count"] / (d["prompt_eval_duration"] / 1e9)),

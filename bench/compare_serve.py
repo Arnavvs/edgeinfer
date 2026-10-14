@@ -31,6 +31,9 @@ HOME = Path.home()
 LLAMA_BIN = Path(os.environ.get("LLAMA_BIN", HOME / "edgeinfer-data" / "baselines" / "llama-b11606"))
 OLLAMA = os.environ.get("OLLAMA", str(HOME / "edgeinfer-data" / "ollama" / "bin" / "ollama"))
 PY = str(ROOT / ".venv" / "bin" / "python")
+# one connection per request for every server: llama-server's HTTP layer may close a
+# connection after a streamed response, and a pooled reuse then fails on the client
+NO_KEEPALIVE = httpx.Limits(max_keepalive_connections=0)
 
 SCHEMA = "\n".join(
     f"TABLE t{i} ({200 + i * 37} rows): " + ", ".join(f"col_{i}_{j} {'INTEGER' if j % 3 else 'TEXT'}" for j in range(9))
@@ -60,7 +63,7 @@ def find_port_free(port):
 
 async def wait_up(url, timeout=600):
     t0 = time.time()
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(limits=NO_KEEPALIVE) as c:
         while time.time() - t0 < timeout:
             try:
                 r = await c.get(url, timeout=2)
@@ -90,7 +93,7 @@ def start(server, a):
         env["LD_LIBRARY_PATH"] = str(exe.parent)
         proc = subprocess.Popen([str(exe), "-m", a.gguf, "-t", str(a.threads), "-c", "16384", "-np", "2",
                                  "--port", "8192", "--host", "127.0.0.1", "--jinja", "--no-webui"],
-                                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                env=env, stdout=open("/tmp/bench-llama-server.log", "w"), stderr=subprocess.STDOUT)
         return proc, "http://127.0.0.1:8192", "/health", "default"
     if server == "ollama":
         home = HOME / "edgeinfer-data" / "ollama"
@@ -140,7 +143,7 @@ async def chat(client, base, model, messages, max_tokens):
 async def scenario_turns(base, model, turns, max_tokens):
     msgs = [{"role": "system", "content": SYSTEM}]
     out = []
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(limits=NO_KEEPALIVE) as c:
         for i in range(turns):
             msgs.append({"role": "user", "content": QUESTIONS[i % len(QUESTIONS)]})
             r = await chat(c, base, model, msgs, max_tokens)
@@ -150,7 +153,7 @@ async def scenario_turns(base, model, turns, max_tokens):
 
 
 async def scenario_concurrency(base, model, n, max_tokens):
-    async with httpx.AsyncClient() as c:
+    async with httpx.AsyncClient(limits=NO_KEEPALIVE) as c:
         t0 = time.time()
         rs = await asyncio.gather(*[chat(c, base, model, [{"role": "user", "content":
                                                           f"Request {k}: " + QUESTIONS[k % len(QUESTIONS)]}], max_tokens)
@@ -167,7 +170,7 @@ async def main_async(a):
         proc, base, health, model = start(server, a)
         try:
             await wait_up(base + health)
-            async with httpx.AsyncClient() as c:  # warm-up: load weights, first request
+            async with httpx.AsyncClient(limits=NO_KEEPALIVE) as c:  # warm-up: load weights, first request
                 await chat(c, base, model, [{"role": "user", "content": "hi"}], 4)
             rows = []
             for r in await scenario_turns(base, model, a.turns, a.max_tokens):
@@ -204,7 +207,7 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=64)
     ap.add_argument("--concurrency", default="1,2")
     ap.add_argument("--threads", type=int, default=4)
-    ap.add_argument("--draft", type=int, default=2)
+    ap.add_argument("--draft", type=int, default=0)
     ap.add_argument("--out", default=str(HOME / "edgeinfer-data" / "results" / "serve.jsonl"))
     asyncio.run(main_async(ap.parse_args()))
 
