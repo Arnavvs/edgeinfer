@@ -401,7 +401,11 @@ class Scheduler:
                 if any(h is None for h in hid):
                     r.mtp_ok = False
                 else:
-                    self.ctx.mtp_forward(si, p0, r.prompt[p0 + 1:p1 + 2], np.stack(hid))
+                    # Resuming from a snapshot adds the entry before the chunk, so a full
+                    # chunk is max_batch + 1 entries: more than one engine call may take.
+                    toks, hid = r.prompt[p0 + 1:p1 + 2], np.stack(hid)
+                    for i in range(0, len(toks), self.max_batch):
+                        self.ctx.mtp_forward(si, p0 + i, toks[i:i + self.max_batch], hid[i:i + self.max_batch])
             s.last_hidden = H[-1].copy()
         else:
             s.last_hidden = None  # unknown here; snapshots taken now must not offer MTP resume

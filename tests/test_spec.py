@@ -124,6 +124,26 @@ def main():
     print(f"disk  : after restart encoded {f2['prompt_tokens_encoded']} of {second['info']['usage']['prompt_tokens']} "
           f"prompt tokens (first run {f1['prompt_tokens_encoded']}), TTFT {f2['ttft_s']} s vs {f1['ttft_s']} s, "
           f"restores {restored}, output matches for {m3}/{len(first['tokens'])} tokens")
+    # resume from the system-prompt snapshot, then a new message longer than a
+    # prefill chunk: the MTP catch-up spans max_batch + 1 positions (this used to
+    # fail with "ei_mtp_forward failed (-2)")
+    sys_msg = {"role": "system", "content": "You answer questions about a table. " + " ".join(
+        f"Rule {i}: answer briefly and never invent numbers." for i in range(30))}
+    table = "\n".join(f"| Sector {i} | {i * 37 % 211} businesses |" for i in range(1, 90))
+    long_q = [sys_msg, {"role": "user", "content": "Here is a table:\n" + table + "\nWhich sector has the most?"}]
+    s3 = Scheduler(m, tok, n_slots=1, n_ctx=4096, n_draft=a.draft, spec=True)
+    generate(s3, tok, [sys_msg, {"role": "user", "content": "hi"}], 8, spec=True)
+    warm3 = generate(s3, tok, long_q, 24, spec=True)
+    s3.shutdown()
+    s4 = Scheduler(m, tok, n_slots=1, n_ctx=4096, n_draft=a.draft, spec=True)
+    cold3 = generate(s4, tok, long_q, 24, spec=True)
+    s4.shutdown()
+    w3 = warm3["info"]  # an engine error ends the request with finish_reason "error"
+    reused = w3["usage"]["prompt_tokens_details"]["cached_tokens"]
+    m4 = prefix_match(warm3["tokens"], cold3["tokens"])
+    ok &= w3["finish_reason"] in ("stop", "length") and reused > 0 and m4 >= 8
+    print(f"resume: finish {w3['finish_reason']}, reused {reused} of {w3['usage']['prompt_tokens']} prompt tokens, "
+          f"output matches cold run for {m4}/{len(cold3['tokens'])} tokens")
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
